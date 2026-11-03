@@ -2023,6 +2023,49 @@ describe('Server Integration Tests', () => {
       expect(nextSession.threads[0].finding).not.toHaveProperty('decision');
     });
 
+    describe('when a client posts findings without history on a stale baseVersion', () => {
+      async function decideWithoutHistory(port: number, session: any, decision?: string) {
+        await fetch(`http://localhost:${port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseVersion: session.version - 1,
+            threads: session.threads.map((thread: any) => {
+              const { reviewer, severity, title } = thread.finding;
+              return { ...thread, finding: { reviewer, severity, title, decision } };
+            }),
+          }),
+        });
+        const response = await fetch(`http://localhost:${port}/api/comments-json`);
+        return (await response.json()) as any;
+      }
+
+      it('keeps the fingerprint so the decision carries over to the next round', async () => {
+        const port = await startRound(9125, 'a\nb\nreturn value.name;\n');
+        const session = await importFindings(port, [findingImport(3)]);
+
+        const decided = await decideWithoutHistory(port, session, 'adopted');
+        expect(decided.threads[0].finding.fingerprint).toBe(session.threads[0].finding.fingerprint);
+
+        const nextPort = await startRound(9130, 'a\nb\nreturn value.name;\n');
+        const nextSession = await importFindings(nextPort, [findingImport(3)]);
+        expect(nextSession.threads[0].finding.previousDecision).toBe('adopted');
+      });
+
+      it('forgets a decision removed by the client', async () => {
+        const port = await startRound(9135, 'a\nb\nreturn value.name;\n');
+        const session = await importFindings(port, [findingImport(3)]);
+        const decided = await decideWithoutHistory(port, session, 'rejected');
+
+        const withdrawn = await decideWithoutHistory(port, decided);
+        expect(withdrawn.threads[0].finding).not.toHaveProperty('decision');
+
+        const nextPort = await startRound(9140, 'a\nb\nreturn value.name;\n');
+        const nextSession = await importFindings(nextPort, [findingImport(3)]);
+        expect(nextSession.threads[0].finding).not.toHaveProperty('previousDecision');
+      });
+    });
+
     it('does not track decisions for stdin diffs', async () => {
       const result = await startServer({
         stdinDiff: 'diff --git a/a b/a',

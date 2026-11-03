@@ -499,5 +499,56 @@ describe('commentImports', () => {
       expect(result.threads[0]?.kind).toBe('finding');
       expect(result.threads[0]?.finding?.reviewer).toBe('correctness');
     });
+
+    describe('when a client posts a finding without history on a stale baseVersion', () => {
+      const createFindingThreadWithHistory = (): DiffCommentThread => {
+        const [thread] = mergeCommentImports([], normalizeCommentImports(findingImport), () => ({
+          fingerprint: 'fp-1',
+          decision: 'adopted',
+          previousDecision: 'rejected',
+        })).threads;
+        if (!thread) throw new Error('expected a finding thread');
+        return thread;
+      };
+      const findingWithoutHistory: FindingMeta = {
+        reviewer: 'correctness',
+        severity: 'warn',
+        title: 'T',
+      };
+
+      it('keeps the existing fingerprint and previous decision with the incoming decision', () => {
+        const existing = createFindingThreadWithHistory();
+        const incoming: DiffCommentThread = {
+          ...existing,
+          finding: { ...findingWithoutHistory, decision: 'rejected' },
+        };
+
+        const result = mergeCommentThreads([existing], [incoming]);
+
+        expect(result.threads[0]?.finding).toEqual({
+          reviewer: 'correctness',
+          severity: 'warn',
+          title: 'T',
+          decision: 'rejected',
+          fingerprint: 'fp-1',
+          previousDecision: 'rejected',
+        });
+      });
+
+      it('keeps an explicit decision removal while preserving the history', () => {
+        const existing = createFindingThreadWithHistory();
+        const incoming: DiffCommentThread = { ...existing, finding: findingWithoutHistory };
+
+        const result = mergeCommentThreads([existing], [incoming]);
+
+        expect(result.threads[0]?.finding).toEqual({
+          reviewer: 'correctness',
+          severity: 'warn',
+          title: 'T',
+          fingerprint: 'fp-1',
+          previousDecision: 'rejected',
+        });
+      });
+    });
   });
 });

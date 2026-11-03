@@ -480,6 +480,23 @@ function pickNewerMessage(
   return cloneMessage(existingMessage);
 }
 
+function mergeFinding(
+  existingFinding: FindingMeta | undefined,
+  incomingFinding: FindingMeta | undefined,
+): FindingMeta | undefined {
+  if (!incomingFinding || !existingFinding) {
+    return incomingFinding ?? existingFinding;
+  }
+
+  const fingerprint = incomingFinding.fingerprint ?? existingFinding.fingerprint;
+  const previousDecision = incomingFinding.previousDecision ?? existingFinding.previousDecision;
+  return {
+    ...incomingFinding,
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(previousDecision ? { previousDecision } : {}),
+  };
+}
+
 function mergeThread(
   existingThread: DiffCommentThread,
   incomingThread: DiffCommentThread,
@@ -519,7 +536,7 @@ function mergeThread(
     messages: orderedMessages,
     ...cloneReviewMeta({
       kind: incomingThread.kind ?? existingThread.kind,
-      finding: incomingThread.finding ?? existingThread.finding,
+      finding: mergeFinding(existingThread.finding, incomingThread.finding),
     }),
   };
 }
