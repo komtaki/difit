@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -27,7 +27,7 @@ function formatReviewerStatus(reviewer: ReviewerState, findingCount: number): st
   return `done · ${findingCount} ${findingCount === 1 ? 'finding' : 'findings'}`;
 }
 
-export function OverviewPanel({
+export const OverviewPanel = memo(function OverviewPanel({
   markdown,
   reviewers,
   findingCountByReviewer,
@@ -100,4 +100,4 @@ export function OverviewPanel({
       )}
     </div>
   );
-}
+});

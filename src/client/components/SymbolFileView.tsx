@@ -1,5 +1,5 @@
 import { Highlight } from 'prism-react-renderer';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 
 import { useHighlightedCode } from '../hooks/useHighlightedCode';
 import { getPrismLanguageFromFilename } from '../utils/languageDetection';
@@ -34,7 +34,7 @@ async function fetchRepositoryFile(filePath: string): Promise<FileState> {
   }
 }
 
-function HighlightedFile({
+const HighlightedFile = memo(function HighlightedFile({
   content,
   filePath,
   line,
@@ -99,7 +99,7 @@ function HighlightedFile({
       )}
     </Highlight>
   );
-}
+});
 
 export function SymbolFileView({ filePath, line, syntaxTheme }: SymbolFileViewProps) {
   const [file, setFile] = useState<FileState>(null);
