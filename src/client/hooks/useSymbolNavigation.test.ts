@@ -58,6 +58,7 @@ describe('useSymbolNavigation', () => {
 
     await waitFor(() => expect(result.current.status).toEqual(enabledStatus));
     expect(result.current.current).toBeNull();
+    expect(result.current.view).toBeNull();
     expect(result.current.canGoBack).toBe(false);
   });
 
@@ -153,6 +154,56 @@ describe('useSymbolNavigation', () => {
       result.current.close();
     });
     expect(result.current.current).toBeNull();
+    expect(result.current.canGoBack).toBe(false);
+  });
+
+  it('views the first definition inside the repository after a lookup', async () => {
+    respondWith({
+      '/api/lsp/status': { body: enabledStatus },
+      '/api/lsp/definition': {
+        body: { locations: [location('/usr/lib/value.d.ts', 1), location('src/b.ts', 4)] },
+      },
+      '/api/lsp/references': { body: { locations: [] } },
+    });
+    const { result } = renderHook(() => useSymbolNavigation());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.lookup(target(12));
+    });
+
+    expect(result.current.view).toEqual({ filePath: 'src/b.ts', line: 4 });
+    expect(result.current.canGoBack).toBe(false);
+  });
+
+  it('opens locations in the panel and goes back to the previously viewed one', async () => {
+    respondWith({
+      '/api/lsp/status': { body: enabledStatus },
+      '/api/lsp/definition': { body: { locations: [location('src/b.ts', 4)] } },
+      '/api/lsp/references': { body: { locations: [location('src/c.ts', 30)] } },
+    });
+    const { result } = renderHook(() => useSymbolNavigation());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+    await act(async () => {
+      await result.current.lookup(target(12));
+    });
+
+    act(() => {
+      result.current.open(location('src/c.ts', 30));
+    });
+    expect(result.current.view).toEqual({ filePath: 'src/c.ts', line: 30 });
+    expect(result.current.current?.symbol).toBe('value');
+    expect(result.current.canGoBack).toBe(true);
+
+    act(() => {
+      result.current.open(location('/usr/lib/value.d.ts', 1));
+    });
+    expect(result.current.view).toEqual({ filePath: 'src/c.ts', line: 30 });
+
+    act(() => {
+      result.current.back();
+    });
+    expect(result.current.view).toEqual({ filePath: 'src/b.ts', line: 4 });
     expect(result.current.canGoBack).toBe(false);
   });
 });

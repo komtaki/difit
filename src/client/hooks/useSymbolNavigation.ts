@@ -11,6 +11,26 @@ export interface SymbolLookup {
 
 export type SymbolTarget = LspPositionRequest & { symbol: string };
 
+export interface ViewedLocation {
+  filePath: string;
+  line: number;
+}
+
+interface PanelEntry {
+  lookup: SymbolLookup;
+  view: ViewedLocation | null;
+}
+
+export const isRepositoryPath = (filePath: string) =>
+  !filePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(filePath);
+
+const toView = ({ filePath, line }: LspLocation): ViewedLocation => ({ filePath, line });
+
+const firstViewableLocation = (locations: LspLocation[]) => {
+  const location = locations.find(({ filePath }) => isRepositoryPath(filePath));
+  return location ? toView(location) : null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -49,7 +69,7 @@ async function fetchLocations(
 
 export function useSymbolNavigation() {
   const [status, setStatus] = useState<LspStatusResponse | null>(null);
-  const [lookups, setLookups] = useState<SymbolLookup[]>([]);
+  const [entries, setEntries] = useState<PanelEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +90,13 @@ export function useSymbolNavigation() {
           fetchLocations('definition', origin),
           fetchLocations('references', origin),
         ]);
-        setLookups((prev) => [...prev, { symbol, origin, definition, references }]);
+        setEntries((prev) => [
+          ...prev,
+          {
+            lookup: { symbol, origin, definition, references },
+            view: firstViewableLocation(definition),
+          },
+        ]);
       } catch (lookupError) {
         setError(lookupError instanceof Error ? lookupError.message : String(lookupError));
       } finally {
@@ -81,24 +107,36 @@ export function useSymbolNavigation() {
     [refreshStatus],
   );
 
+  const open = useCallback((location: LspLocation) => {
+    if (!isRepositoryPath(location.filePath)) return;
+    setEntries((prev) => {
+      const latest = prev.at(-1);
+      return latest ? [...prev, { lookup: latest.lookup, view: toView(location) }] : prev;
+    });
+  }, []);
+
   const back = useCallback(() => {
     setError(null);
-    setLookups((prev) => prev.slice(0, -1));
+    setEntries((prev) => prev.slice(0, -1));
   }, []);
 
   const close = useCallback(() => {
     setError(null);
-    setLookups([]);
+    setEntries([]);
   }, []);
+
+  const latest = entries.at(-1);
 
   return {
     status,
-    current: lookups.at(-1) ?? null,
+    current: latest?.lookup ?? null,
+    view: latest?.view ?? null,
     isLoading,
     error,
     lookup,
+    open,
     back,
     close,
-    canGoBack: lookups.length > 1,
+    canGoBack: entries.length > 1,
   };
 }

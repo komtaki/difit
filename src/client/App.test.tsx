@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
@@ -1306,6 +1306,11 @@ describe('App Component - Symbol navigation', () => {
     ],
   };
 
+  const fileContents: Record<string, string> = {
+    'src/b.ts': '// b\n// helper\nexport const other = 1;\n',
+    'src/c.ts': 'import { other } from "./b";\nconsole.log(other);\n',
+  };
+
   const mockLspFetch = (enabled: boolean) => {
     vi.mocked(global.fetch).mockImplementation((input) => {
       const path = String(input).split('?')[0] ?? '';
@@ -1333,7 +1338,22 @@ describe('App Component - Symbol navigation', () => {
         });
       }
       if (path === '/api/lsp/references') {
-        return json({ locations: [] });
+        return json({
+          locations: [
+            {
+              filePath: 'src/c.ts',
+              line: 2,
+              character: 9,
+              inDiff: false,
+              preview: ['console.log(other);'],
+              previewStartLine: 2,
+            },
+          ],
+        });
+      }
+      if (path === '/api/lsp/file') {
+        const filePath = new URLSearchParams(String(input).split('?')[1]).get('path') ?? '';
+        return json({ content: fileContents[filePath] });
       }
       if (path === '/api/revisions') {
         return json({ specialOptions: [], branches: [], commits: [] });
@@ -1372,8 +1392,8 @@ describe('App Component - Symbol navigation', () => {
     });
     fireEvent.click(token, { metaKey: true });
 
-    expect(await screen.findByRole('region', { name: 'Definition' })).toBeInTheDocument();
-    expect(screen.getByText('src/b.ts:3')).toBeInTheDocument();
+    const definition = await screen.findByRole('region', { name: 'Definition' });
+    expect(within(definition).getByText('src/b.ts:3')).toBeInTheDocument();
     const definitionRequest = vi
       .mocked(global.fetch)
       .mock.calls.find(([url]) => url === '/api/lsp/definition')?.[1];
@@ -1387,7 +1407,10 @@ describe('App Component - Symbol navigation', () => {
     expect(screen.queryByRole('region', { name: 'Definition' })).not.toBeInTheDocument();
   });
 
-  it('opens locations outside the diff in a read-only preview', async () => {
+  const viewedLine = () =>
+    screen.getByRole('region', { name: 'File content' }).querySelector('[data-target-line="true"]');
+
+  it('shows the whole definition file and follows references inside the panel', async () => {
     mockLspFetch(true);
     renderApp();
 
@@ -1398,9 +1421,21 @@ describe('App Component - Symbol navigation', () => {
       );
     });
     fireEvent.click(token, { ctrlKey: true });
-    fireEvent.click(await screen.findByRole('button', { name: 'src/b.ts:3' }));
 
-    expect(await screen.findByRole('dialog', { name: 'src/b.ts:3' })).toBeInTheDocument();
+    expect(await screen.findByText('src/b.ts:3', { selector: 'p' })).toBeInTheDocument();
+    await waitFor(() => expect(viewedLine()).toHaveTextContent('export const other = 1;'));
+    expect(screen.getByRole('region', { name: 'File content' })).toHaveTextContent('// helper');
+
+    fireEvent.click(screen.getByRole('button', { name: /src\/c\.ts:2/ }));
+
+    await waitFor(() => expect(viewedLine()).toHaveTextContent('console.log(other);'));
+    expect(screen.getByText('src/c.ts:2', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => expect(viewedLine()).toHaveTextContent('export const other = 1;'));
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
   });
 
   it('does nothing on Cmd+click when the language servers are disabled', async () => {

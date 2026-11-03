@@ -11,7 +11,6 @@ import {
   type CommentThread,
   type RevisionsResponse,
 } from '../types/diff';
-import type { LspLocation } from '../types/lsp';
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode';
 import { getThreadKind, mergeCommentThreads } from '../utils/commentImports';
 import {
@@ -33,7 +32,6 @@ import { GitHubIcon } from './components/GitHubIcon';
 import { HelpModal } from './components/HelpModal';
 import { Logo } from './components/Logo';
 import { OverviewPanel } from './components/OverviewPanel';
-import { ReadOnlyFileModal } from './components/ReadOnlyFileModal';
 import { ReloadButton } from './components/ReloadButton';
 import { RevisionDetailModal } from './components/RevisionDetailModal';
 import { ReviewTabs, type ReviewTab } from './components/ReviewTabs';
@@ -81,6 +79,9 @@ const SIDEBAR_OPEN_STORAGE_KEY = 'difit.sidebarOpen';
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 600;
 const SIDEBAR_DEFAULT_WIDTH = 280;
+const SYMBOL_PANEL_MIN_WIDTH = 320;
+const SYMBOL_PANEL_MAX_WIDTH = 1200;
+const SYMBOL_PANEL_DEFAULT_WIDTH = 560;
 
 const parseDiffViewMode = (value: unknown): DiffViewMode | null => {
   switch (value) {
@@ -110,6 +111,9 @@ const getInitialDiffViewMode = () => getStoredDiffViewMode() ?? DEFAULT_DIFF_VIE
 
 const clampSidebarWidth = (width: number) =>
   Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
+
+const clampSymbolPanelWidth = (width: number) =>
+  Math.min(SYMBOL_PANEL_MAX_WIDTH, Math.max(SYMBOL_PANEL_MIN_WIDTH, width));
 
 const getStoredSidebarWidth = (): number | null => {
   if (typeof window === 'undefined') {
@@ -153,6 +157,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isCopiedAll, setIsCopiedAll] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
+  const [symbolPanelWidth, setSymbolPanelWidth] = useState(SYMBOL_PANEL_DEFAULT_WIDTH);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(getInitialFileTreeOpen);
   const [isDragging, setIsDragging] = useState(false);
@@ -723,18 +728,13 @@ function App() {
     [generateThreadPrompt],
   );
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const startColumnResize = (e: React.MouseEvent, resize: (deltaX: number) => void) => {
     e.preventDefault();
     setIsDragging(true);
     const startX = e.clientX;
-    const startWidth = sidebarWidth;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = Math.max(
-        SIDEBAR_MIN_WIDTH,
-        Math.min(SIDEBAR_MAX_WIDTH, startWidth + (e.clientX - startX)),
-      );
-      setSidebarWidth(newWidth);
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      resize(moveEvent.clientX - startX);
     };
 
     const handleMouseUp = () => {
@@ -745,6 +745,18 @@ function App() {
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const startWidth = sidebarWidth;
+    startColumnResize(e, (deltaX) => setSidebarWidth(clampSidebarWidth(startWidth + deltaX)));
+  };
+
+  const handleSymbolPanelResizeStart = (e: React.MouseEvent) => {
+    const startWidth = symbolPanelWidth;
+    startColumnResize(e, (deltaX) =>
+      setSymbolPanelWidth(clampSymbolPanelWidth(startWidth - deltaX)),
+    );
   };
 
   const fetchDiffData = useCallback(
@@ -1204,14 +1216,12 @@ function App() {
   const isFileInDiff = useCallback((filePath: string) => filesByPath.has(filePath), [filesByPath]);
 
   const symbolNavigation = useSymbolNavigation();
-  const { lookup: lookupSymbol, back: backSymbol } = symbolNavigation;
+  const { lookup: lookupSymbol } = symbolNavigation;
   const lspStatus = symbolNavigation.status?.enabled ? symbolNavigation.status : null;
   const isSymbolPanelOpen =
     symbolNavigation.current !== null ||
     symbolNavigation.isLoading ||
     symbolNavigation.error !== null;
-  const symbolOrigin = symbolNavigation.current?.origin;
-  const [readOnlyLocation, setReadOnlyLocation] = useState<LspLocation | null>(null);
 
   const handleSymbolClickCapture = useCallback(
     (e: React.MouseEvent) => {
@@ -1224,24 +1234,6 @@ function App() {
     },
     [lspStatus, lookupSymbol],
   );
-
-  const handleSelectSymbolLocation = useCallback(
-    (location: LspLocation) => {
-      if (location.inDiff) {
-        showLineInDiff(location.filePath, location.line);
-      } else {
-        setReadOnlyLocation(location);
-      }
-    },
-    [showLineInDiff],
-  );
-
-  const handleSymbolBack = useCallback(() => {
-    if (symbolOrigin) {
-      showLineInDiff(symbolOrigin.filePath, symbolOrigin.line);
-    }
-    backSymbol();
-  }, [backSymbol, showLineInDiff, symbolOrigin]);
 
   const handleScrollToFile = useCallback(
     (filePath: string) => {
@@ -1749,16 +1741,27 @@ function App() {
             })}
           </main>
           {activeTab === 'files' && lspStatus && isSymbolPanelOpen && (
-            <SymbolPanel
-              status={lspStatus}
-              current={symbolNavigation.current}
-              isLoading={symbolNavigation.isLoading}
-              error={symbolNavigation.error}
-              canGoBack={symbolNavigation.canGoBack}
-              onSelectLocation={handleSelectSymbolLocation}
-              onBack={handleSymbolBack}
-              onClose={symbolNavigation.close}
-            />
+            <>
+              <div
+                className="w-1 shrink-0 cursor-col-resize bg-github-border hover:bg-github-text-muted"
+                onMouseDown={handleSymbolPanelResizeStart}
+                title="Drag to resize symbol panel"
+              />
+              <SymbolPanel
+                status={lspStatus}
+                current={symbolNavigation.current}
+                view={symbolNavigation.view}
+                isLoading={symbolNavigation.isLoading}
+                error={symbolNavigation.error}
+                canGoBack={symbolNavigation.canGoBack}
+                width={symbolPanelWidth}
+                syntaxTheme={settings.syntaxTheme}
+                onOpenLocation={symbolNavigation.open}
+                onShowInDiff={showLineInDiff}
+                onBack={symbolNavigation.back}
+                onClose={symbolNavigation.close}
+              />
+            </>
           )}
         </div>
 
@@ -1786,14 +1789,6 @@ function App() {
         )}
 
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
-
-        {readOnlyLocation && (
-          <ReadOnlyFileModal
-            filePath={readOnlyLocation.filePath}
-            line={readOnlyLocation.line}
-            onClose={() => setReadOnlyLocation(null)}
-          />
-        )}
 
         <CommentsListModal
           isOpen={isCommentsListOpen}
