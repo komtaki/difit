@@ -185,6 +185,18 @@ describe('startLspClient', () => {
     await expect(start()).rejects.toThrow(/fatal: cannot start/);
   });
 
+  it('keeps the end of a long stderr so the crash reason survives', async () => {
+    process.env.FAKE_LSP_MODE = 'noisy-crash';
+
+    const message = await start().then(
+      () => '',
+      (error: Error) => error.message,
+    );
+
+    expect(message).toMatch(/fatal: cannot start$/);
+    expect(message.length).toBeLessThan(2100);
+  });
+
   it('sends shutdown and exit, then reports the exit', async () => {
     client = await start();
     const exited = new Promise<string>((resolve) => client!.onExit(resolve));

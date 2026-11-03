@@ -133,9 +133,7 @@ export async function startLspClient(options: {
   const exitListeners: Array<(detail: string) => void> = [];
 
   child.stderr.on('data', (chunk: Buffer) => {
-    if (stderr.length < STDERR_LIMIT) {
-      stderr = `${stderr}${chunk.toString('utf8')}`.slice(0, STDERR_LIMIT);
-    }
+    stderr = `${stderr}${chunk.toString('utf8')}`.slice(-STDERR_LIMIT);
   });
   child.stdin.on('error', () => {});
 

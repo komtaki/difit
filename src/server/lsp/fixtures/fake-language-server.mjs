@@ -8,7 +8,11 @@ let isLoading = false;
 
 process.stderr.write('fake language server booting\n');
 
-if (mode === 'crash') {
+if (mode === 'noisy-crash') {
+  process.stderr.write('loading project\n'.repeat(500));
+}
+
+if (mode === 'crash' || mode === 'noisy-crash') {
   process.stderr.write('fatal: cannot start\n');
   process.exit(3);
 }
