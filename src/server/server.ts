@@ -24,6 +24,7 @@ import {
   resolveEditorOption,
 } from '../utils/editorOptions.js';
 import { getFileExtension } from '../utils/fileUtils.js';
+import { selectThreadsForOutput } from '../utils/reviewOutput.js';
 
 import { FileWatcherService } from './file-watcher.js';
 import { GitDiffParser } from './git-diff.js';
@@ -817,10 +818,11 @@ export async function startServer(
   app.get('/api/comments-output', (req, res) => {
     const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
     const session = getOrCreateCommentSession(selection);
+    const outputThreads = selectThreadsForOutput(session.threads);
     res.type('text/plain');
 
-    if (session.threads.length > 0) {
-      const output = formatCommentsOutput(session.threads.map(toCommentThread));
+    if (outputThreads.length > 0) {
+      const output = formatCommentsOutput(outputThreads.map(toCommentThread));
       res.send(output);
     } else {
       res.send('');
@@ -960,8 +962,9 @@ export async function startServer(
   // Function to output comments when server shuts down
   function outputFinalComments() {
     const session = getOrCreateCommentSession(currentCommentSelection);
-    if (session.threads.length > 0) {
-      console.log(formatCommentsOutput(session.threads.map(toCommentThread)));
+    const outputThreads = selectThreadsForOutput(session.threads);
+    if (outputThreads.length > 0) {
+      console.log(formatCommentsOutput(outputThreads.map(toCommentThread)));
     }
   }
 

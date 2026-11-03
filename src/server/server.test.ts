@@ -1068,6 +1068,87 @@ describe('Server Integration Tests', () => {
       },
     );
 
+    it('GET /api/comments-output includes only adopted or replied AI threads', async () => {
+      const aiThread = (overrides: Record<string, unknown>) => ({
+        type: 'thread',
+        position: { side: 'new', line: 1 },
+        author: 'AI',
+        ...overrides,
+      });
+
+      await fetch(`http://localhost:${port}/api/comment-imports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+          aiThread({ filePath: 'src/plain.ts', body: 'Human comment' }),
+          aiThread({
+            filePath: 'src/explained.ts',
+            kind: 'explanation',
+            body: 'Silent explanation',
+          }),
+          aiThread({
+            filePath: 'src/undecided.ts',
+            kind: 'finding',
+            reviewer: 'security',
+            severity: 'info',
+            title: 'Undecided',
+            body: 'Undecided finding',
+          }),
+          aiThread({
+            id: 'adopt-me',
+            filePath: 'src/adopted.ts',
+            kind: 'finding',
+            reviewer: 'correctness',
+            severity: 'error',
+            title: 'Adopted',
+            body: 'Adopted finding',
+          }),
+        ]),
+      });
+
+      const jsonResponse = await fetch(`http://localhost:${port}/api/comments-json`);
+      const data = (await jsonResponse.json()) as any;
+      await fetch(`http://localhost:${port}/api/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseVersion: data.version,
+          threads: data.threads.map((thread: any) =>
+            thread.id === 'adopt-me'
+              ? { ...thread, finding: { ...thread.finding, decision: 'adopted' } }
+              : thread,
+          ),
+        }),
+      });
+
+      const response = await fetch(`http://localhost:${port}/api/comments-output`);
+      const output = await response.text();
+
+      expect(output).toContain('src/plain.ts:L1\nHuman comment');
+      expect(output).toContain('src/adopted.ts:L1\n[AI:correctness] Adopted finding');
+      expect(output).not.toContain('Silent explanation');
+      expect(output).not.toContain('Undecided finding');
+      expect(output).toContain('Total comments: 2');
+    });
+
+    it('GET /api/comments-output is empty when only unadopted AI threads exist', async () => {
+      await fetch(`http://localhost:${port}/api/comment-imports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'thread',
+          kind: 'explanation',
+          filePath: 'src/explained.ts',
+          position: { side: 'new', line: 1 },
+          body: 'Silent explanation',
+        }),
+      });
+
+      const response = await fetch(`http://localhost:${port}/api/comments-output`);
+
+      expect(await response.text()).toBe('');
+    });
+
     it('POST /api/comment-imports deduplicates identical finding imports', async () => {
       const findingImport = {
         type: 'thread',
