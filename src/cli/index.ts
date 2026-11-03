@@ -20,6 +20,11 @@ import {
   readStdin,
 } from './utils.js';
 import { createCommentCommand } from './comment.js';
+import {
+  createOverviewCommand,
+  createReviewerCommand,
+  readOverviewFile,
+} from './review-commands.js';
 import { getPrPatch, getPrCommentImports } from './github.js';
 import {
   BACKGROUND_CHILD_ENV,
@@ -90,6 +95,7 @@ interface CliOptions {
   background?: boolean;
   context?: number;
   mergeBase?: boolean;
+  overview?: string;
 }
 
 const program = new Command();
@@ -100,6 +106,8 @@ program
   .version(pkg.version, '-v, --version', 'output the version number')
   .enablePositionalOptions()
   .addCommand(createCommentCommand())
+  .addCommand(createOverviewCommand())
+  .addCommand(createReviewerCommand())
   .argument(
     '[commit-ish]',
     'Git commit, tag, branch, HEAD~n reference, or "working"/"staged"/"."',
@@ -128,6 +136,7 @@ program
     '--merge-base',
     'resolve the base revision with git merge-base before diffing (Git revision mode only)',
   )
+  .option('--overview <file>', 'show a markdown file as the change overview')
   .action(async (commitish: string, compareWith: string | undefined, options: CliOptions) => {
     try {
       const isBackgroundChild = process.env[BACKGROUND_CHILD_ENV] === '1';
@@ -158,6 +167,18 @@ program
           `Error: ${error instanceof Error ? error.message : 'Invalid --comment value'}`,
         );
         process.exit(1);
+      }
+
+      let overview: string | undefined;
+      if (options.overview !== undefined) {
+        try {
+          overview = await readOverviewFile(options.overview);
+        } catch (error) {
+          console.error(
+            `Error: ${error instanceof Error ? error.message : 'Invalid --overview value'}`,
+          );
+          process.exit(1);
+        }
       }
 
       if (backgroundMode) {
@@ -235,6 +256,7 @@ program
           clearComments: options.clean,
           keepAlive: options.keepAlive,
           ...(commentImports.length > 0 ? { commentImports } : {}),
+          ...(overview !== undefined ? { overview } : {}),
         });
 
         if (backgroundMode) {
@@ -298,6 +320,7 @@ program
         diffMode: determineDiffMode(selection, compareWith),
         repoPath,
         ...(commentImports.length > 0 ? { commentImports } : {}),
+        ...(overview !== undefined ? { overview } : {}),
       });
 
       if (backgroundMode) {

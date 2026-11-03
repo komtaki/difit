@@ -28,6 +28,7 @@ import { selectThreadsForOutput } from '../utils/reviewOutput.js';
 
 import { FileWatcherService } from './file-watcher.js';
 import { GitDiffParser } from './git-diff.js';
+import { createReviewContext } from './review-context.js';
 import { parseUserSettingsPatch, readUserConfig, updateUserClientSettings } from './user-config.js';
 
 import {
@@ -41,6 +42,7 @@ import {
   type GeneratedStatusResponse,
   type RevisionsResponse,
 } from '@/types/diff.js';
+import { type ReviewerStatus } from '@/types/review.js';
 import {
   createDiffSelection,
   diffSelectionsEqual,
@@ -60,6 +62,7 @@ interface ServerOptions {
   diffMode?: DiffMode;
   repoPath?: string;
   contextLines?: number;
+  overview?: string;
 }
 
 const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
@@ -120,6 +123,34 @@ function createResolvedCommentSelection(
 
 function createCommentSessionKey(selection: DiffSelection): string {
   return getDiffSelectionKey(selection);
+}
+
+function parseJsonBody(body: unknown): unknown {
+  return typeof body === 'string' ? (JSON.parse(body) as unknown) : body;
+}
+
+function parseOverviewPayload(body: unknown): string | null {
+  const payload = parseJsonBody(body);
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const { markdown } = payload as { markdown?: unknown };
+  return typeof markdown === 'string' ? markdown : null;
+}
+
+function parseReviewerPayload(body: unknown): { name: string; status: ReviewerStatus } | null {
+  const payload = parseJsonBody(body);
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const { name, status } = payload as { name?: unknown; status?: unknown };
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    return null;
+  }
+  if (status !== 'running' && status !== 'done') {
+    return null;
+  }
+  return { name: name.trim(), status };
 }
 
 export async function startServer(
@@ -245,6 +276,11 @@ export async function startServer(
       command: typeof candidate.command === 'string' ? candidate.command : undefined,
       argsTemplate: typeof candidate.argsTemplate === 'string' ? candidate.argsTemplate : undefined,
     };
+  }
+
+  const reviewContext = createReviewContext();
+  if (options.overview !== undefined) {
+    reviewContext.setOverview(options.overview);
   }
 
   const commentSessions = new Map<string, CommentSessionState>();
@@ -827,6 +863,52 @@ export async function startServer(
     } else {
       res.send('');
     }
+  });
+
+  app.get('/api/overview', (_req, res) => {
+    res.json({ markdown: reviewContext.getOverview() });
+  });
+
+  app.put('/api/overview', (req, res) => {
+    let markdown: string | null;
+    try {
+      markdown = parseOverviewPayload(req.body);
+    } catch {
+      markdown = null;
+    }
+
+    if (markdown === null) {
+      res.status(400).json({ error: 'Invalid overview payload' });
+      return;
+    }
+
+    if (reviewContext.setOverview(markdown)) {
+      fileWatcher.broadcast({ type: 'overviewChanged', timestamp: new Date().toISOString() });
+    }
+    res.json({ success: true });
+  });
+
+  app.get('/api/reviewers', (_req, res) => {
+    res.json({ reviewers: reviewContext.getReviewers() });
+  });
+
+  app.post('/api/reviewers', (req, res) => {
+    let reviewer: { name: string; status: ReviewerStatus } | null;
+    try {
+      reviewer = parseReviewerPayload(req.body);
+    } catch {
+      reviewer = null;
+    }
+
+    if (!reviewer) {
+      res.status(400).json({ error: 'Invalid reviewer payload' });
+      return;
+    }
+
+    if (reviewContext.setReviewerStatus(reviewer.name, reviewer.status)) {
+      fileWatcher.broadcast({ type: 'reviewersChanged', timestamp: new Date().toISOString() });
+    }
+    res.json({ success: true });
   });
 
   app.get('/api/user-settings', async (_req, res) => {

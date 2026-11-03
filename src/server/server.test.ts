@@ -2,11 +2,12 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 // Set environment variable to skip fetch mocking
 process.env.VITEST_SERVER_TEST = 'true';
 
+import { FileWatcherService } from './file-watcher.js';
 import { startServer } from './server.js';
 import type { CommentImport } from '../types/diff.js';
 
@@ -1426,6 +1427,110 @@ describe('Server Integration Tests', () => {
 
       expect(response.status).toBe(400);
       expect(data).toHaveProperty('error', 'Generated status is not available for stdin diff');
+    });
+  });
+
+  describe('Review context API', () => {
+    let port: number;
+    let broadcastSpy: MockInstance<FileWatcherService['broadcast']>;
+
+    beforeEach(async () => {
+      broadcastSpy = vi.spyOn(FileWatcherService.prototype, 'broadcast');
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9090,
+        overview: '# Initial overview',
+      });
+      servers.push(result.server);
+      port = result.port;
+    });
+
+    afterEach(() => {
+      broadcastSpy.mockRestore();
+    });
+
+    const sendJson = (path: string, method: string, body: unknown) =>
+      fetch(`http://localhost:${port}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    it('GET /api/overview returns the overview passed at startup', async () => {
+      const response = await fetch(`http://localhost:${port}/api/overview`);
+
+      expect(await response.json()).toEqual({ markdown: '# Initial overview' });
+    });
+
+    it('GET /api/overview returns null when no overview was given', async () => {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9095,
+      });
+      servers.push(result.server);
+
+      const response = await fetch(`http://localhost:${result.port}/api/overview`);
+
+      expect(await response.json()).toEqual({ markdown: null });
+    });
+
+    it('PUT /api/overview stores the overview and broadcasts the change', async () => {
+      const putResponse = await sendJson('/api/overview', 'PUT', { markdown: '# Updated' });
+
+      expect(await putResponse.json()).toEqual({ success: true });
+      const response = await fetch(`http://localhost:${port}/api/overview`);
+      expect(await response.json()).toEqual({ markdown: '# Updated' });
+      expect(broadcastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'overviewChanged' }),
+      );
+    });
+
+    it('PUT /api/overview does not broadcast when the overview is unchanged', async () => {
+      await sendJson('/api/overview', 'PUT', { markdown: '# Initial overview' });
+
+      expect(broadcastSpy).not.toHaveBeenCalled();
+    });
+
+    it.each([{}, { markdown: 1 }, 'not json'])(
+      'PUT /api/overview rejects an invalid body %j',
+      async (body) => {
+        const response = await sendJson('/api/overview', 'PUT', body);
+
+        expect(response.status).toBe(400);
+      },
+    );
+
+    it('GET /api/reviewers returns an empty list by default', async () => {
+      const response = await fetch(`http://localhost:${port}/api/reviewers`);
+
+      expect(await response.json()).toEqual({ reviewers: [] });
+    });
+
+    it('POST /api/reviewers updates reviewer status and broadcasts the change', async () => {
+      await sendJson('/api/reviewers', 'POST', { name: 'correctness', status: 'running' });
+      await sendJson('/api/reviewers', 'POST', { name: 'correctness', status: 'done' });
+
+      const response = await fetch(`http://localhost:${port}/api/reviewers`);
+      const data = (await response.json()) as any;
+
+      expect(data.reviewers).toEqual([
+        { name: 'correctness', status: 'done', updatedAt: expect.any(String) },
+      ]);
+      expect(broadcastSpy).toHaveBeenCalledTimes(2);
+      expect(broadcastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'reviewersChanged' }),
+      );
+    });
+
+    it.each([
+      {},
+      { name: '', status: 'running' },
+      { name: 'correctness' },
+      { name: 'correctness', status: 'paused' },
+    ])('POST /api/reviewers rejects an invalid body %j', async (body) => {
+      const response = await sendJson('/api/reviewers', 'POST', body);
+
+      expect(response.status).toBe(400);
     });
   });
 
