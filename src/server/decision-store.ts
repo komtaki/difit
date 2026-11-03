@@ -118,15 +118,17 @@ export async function createDecisionStore(options: {
   const records = await readDecisionFile(filePath);
   let pendingWrite: Promise<void> = Promise.resolve();
 
-  const persist = (): Promise<void> => {
+  const persist = (applyChange: (current: Map<string, DecisionRecord>) => void): Promise<void> => {
     const write = async () => {
-      if (records.size === 0) {
+      const current = await readDecisionFile(filePath);
+      applyChange(current);
+      if (current.size === 0) {
         await rm(filePath, { force: true });
         return;
       }
       await mkdir(dirname(filePath), { recursive: true });
       const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-      await writeFile(temporaryPath, `${JSON.stringify(Object.fromEntries(records), null, 2)}\n`);
+      await writeFile(temporaryPath, `${JSON.stringify(Object.fromEntries(current), null, 2)}\n`);
       await rename(temporaryPath, filePath);
     };
     pendingWrite = pendingWrite.then(write, write);
@@ -138,17 +140,16 @@ export async function createDecisionStore(options: {
     get: (fingerprint) => records.get(fingerprint),
     async set(fingerprint, record) {
       records.set(fingerprint, record);
-      await persist();
+      await persist((current) => current.set(fingerprint, record));
     },
     async delete(fingerprint) {
-      if (records.delete(fingerprint)) {
-        await persist();
-      }
+      records.delete(fingerprint);
+      await persist((current) => current.delete(fingerprint));
     },
     all: () => Object.fromEntries(records),
     async clear() {
       records.clear();
-      await persist();
+      await persist((current) => current.clear());
     },
   };
 }

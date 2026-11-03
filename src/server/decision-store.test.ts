@@ -206,6 +206,31 @@ describe('createDecisionStore', () => {
     const reloaded = await createDecisionStore({ repoPath });
     expect(Object.keys(reloaded!.all()).sort()).toEqual(['fp-1', 'fp-2', 'fp-3']);
   });
+
+  it('does not resurrect decisions cleared by another process', async () => {
+    const repoPath = await setupRepository();
+    const store = await createDecisionStore({ repoPath });
+    await store!.set('fp-1', rejectedRecord);
+
+    await (await createDecisionStore({ repoPath }))!.clear();
+    await store!.set('fp-2', rejectedRecord);
+
+    const reloaded = await createDecisionStore({ repoPath });
+    expect(Object.keys(reloaded!.all())).toEqual(['fp-2']);
+  });
+
+  it('keeps decisions saved by another store on the same branch', async () => {
+    const repoPath = await setupRepository();
+    const first = await createDecisionStore({ repoPath });
+    const second = await createDecisionStore({ repoPath });
+
+    await first!.set('fp-1', rejectedRecord);
+    await second!.set('fp-2', rejectedRecord);
+    await first!.delete('fp-3');
+
+    const reloaded = await createDecisionStore({ repoPath });
+    expect(Object.keys(reloaded!.all()).sort()).toEqual(['fp-1', 'fp-2']);
+  });
 });
 
 describe('syncFindingDecisions', () => {
