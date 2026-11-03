@@ -109,6 +109,19 @@ export interface DiffCommentMessage {
   updatedAt: string;
 }
 
+export type ThreadKind = 'comment' | 'explanation' | 'finding';
+export type FindingSeverity = 'info' | 'warn' | 'error';
+export type FindingDecision = 'adopted' | 'rejected';
+
+export interface FindingMeta {
+  reviewer: string;
+  severity: FindingSeverity;
+  title: string;
+  decision?: FindingDecision;
+  previousDecision?: FindingDecision;
+  fingerprint?: string;
+}
+
 // New data structures for enhanced comment and viewed state management
 export interface DiffCommentThread {
   id: string;
@@ -121,6 +134,9 @@ export interface DiffCommentThread {
   codeSnapshot?: DiffCommentCodeSnapshot;
 
   messages: DiffCommentMessage[];
+
+  kind?: ThreadKind;
+  finding?: FindingMeta;
 }
 
 interface CommentImportBase {
@@ -132,6 +148,10 @@ interface CommentImportBase {
   createdAt?: string;
   updatedAt?: string;
   codeSnapshot?: DiffCommentCodeSnapshot;
+  kind?: ThreadKind;
+  reviewer?: string;
+  severity?: FindingSeverity;
+  title?: string;
 }
 
 export interface ThreadCommentImport extends CommentImportBase {

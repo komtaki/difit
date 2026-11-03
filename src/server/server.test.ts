@@ -1018,6 +1018,82 @@ describe('Server Integration Tests', () => {
       expect(threads).toHaveLength(1);
     });
 
+    it.each([
+      { label: 'current', staleBy: 0 },
+      { label: 'stale', staleBy: 1 },
+    ])(
+      'POST /api/comments keeps finding metadata written back with a $label baseVersion',
+      async ({ staleBy }) => {
+        await fetch(`http://localhost:${port}/api/comment-imports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'thread',
+            kind: 'finding',
+            reviewer: 'correctness',
+            severity: 'warn',
+            title: 'Possible null dereference',
+            filePath: 'src/finding.ts',
+            position: { side: 'new', line: 7 },
+            body: 'value may be null here',
+            author: 'AI',
+          }),
+        });
+
+        const importedResponse = await fetch(`http://localhost:${port}/api/comments-json`);
+        const imported = (await importedResponse.json()) as any;
+        const [thread] = imported.threads;
+        expect(thread.kind).toBe('finding');
+
+        await fetch(`http://localhost:${port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseVersion: imported.version - staleBy,
+            threads: [{ ...thread, finding: { ...thread.finding, decision: 'adopted' } }],
+          }),
+        });
+
+        const response = await fetch(`http://localhost:${port}/api/comments-json`);
+        const data = (await response.json()) as any;
+
+        expect(data.threads).toHaveLength(1);
+        expect(data.threads[0].kind).toBe('finding');
+        expect(data.threads[0].finding).toEqual({
+          reviewer: 'correctness',
+          severity: 'warn',
+          title: 'Possible null dereference',
+          decision: 'adopted',
+        });
+      },
+    );
+
+    it('POST /api/comment-imports deduplicates identical finding imports', async () => {
+      const findingImport = {
+        type: 'thread',
+        kind: 'finding',
+        reviewer: 'correctness',
+        severity: 'error',
+        title: 'Duplicate finding',
+        filePath: 'src/finding-dedup.ts',
+        position: { side: 'new', line: 2 },
+        body: 'Same finding twice',
+      };
+
+      for (let i = 0; i < 2; i++) {
+        await fetch(`http://localhost:${port}/api/comment-imports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(findingImport),
+        });
+      }
+
+      const response = await fetch(`http://localhost:${port}/api/comments-json`);
+      const data = (await response.json()) as any;
+
+      expect(data.threads).toHaveLength(1);
+    });
+
     it('DELETE /api/comments/:threadId removes the thread and bumps the version', async () => {
       await fetch(`http://localhost:${port}/api/comment-imports`, {
         method: 'POST',
