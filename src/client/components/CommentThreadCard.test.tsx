@@ -488,7 +488,9 @@ describe('CommentThreadCard', () => {
       const actions = screen.getByRole('button', { name: 'Adopt' }).parentElement;
 
       expect(header).toHaveClass('flex-wrap');
-      expect(headerInfo).toHaveClass('flex-wrap');
+      expect(headerInfo).toHaveClass('flex-wrap', 'flex-auto');
+      expect(headerInfo).not.toHaveClass('flex-1');
+      expect(headerInfo).not.toHaveClass('min-w-0');
       expect(headerInfo).toContainElement(screen.getByText('correctness'));
       expect(actions).toHaveClass('flex-wrap');
       expect(actions).toContainElement(screen.getByTitle('Copy thread prompt for AI coding agent'));
@@ -513,6 +515,7 @@ describe('CommentThreadCard', () => {
       const headerInfo = screen.getByRole('button', { name: 'Collapse thread' }).parentElement;
 
       expect(headerInfo).not.toHaveClass('flex-wrap');
+      expect(headerInfo).toHaveClass('min-w-0', 'flex-1');
       expect(headerInfo?.parentElement).not.toHaveClass('flex-wrap');
     });
 

@@ -310,8 +310,8 @@ export function CommentThreadCard({
         isCollapsed={isCollapsed}
       >
         <div
-          className={`flex min-w-0 flex-1 items-center gap-2 text-xs text-github-text-secondary ${
-            isReviewThread ? 'flex-wrap' : ''
+          className={`flex items-center gap-2 text-xs text-github-text-secondary ${
+            isReviewThread ? 'flex-auto flex-wrap' : 'min-w-0 flex-1'
           }`}
         >
           <button
