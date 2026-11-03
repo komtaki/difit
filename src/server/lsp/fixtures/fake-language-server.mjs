@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs';
 const mode = process.env.FAKE_LSP_MODE ?? 'normal';
 const logPath = process.env.FAKE_LSP_LOG;
 const loadingMs = Number(process.env.FAKE_LSP_LOADING_MS ?? 300);
+const initializeDelayMs = Number(process.env.FAKE_LSP_INITIALIZE_DELAY_MS ?? 0);
 let selfAnswersLeft = Number(process.env.FAKE_LSP_SELF_ANSWERS ?? 0);
 let isLoading = false;
 
@@ -55,10 +56,14 @@ function startProjectLoading() {
 function handleRequest({ id, method, params }) {
   switch (method) {
     case 'initialize':
-      send({
-        id,
-        result: { capabilities: { definitionProvider: true, referencesProvider: true } },
-      });
+      setTimeout(
+        () =>
+          send({
+            id,
+            result: { capabilities: { definitionProvider: true, referencesProvider: true } },
+          }),
+        initializeDelayMs,
+      );
       return;
     case 'textDocument/definition':
       if (mode === 'hang') {

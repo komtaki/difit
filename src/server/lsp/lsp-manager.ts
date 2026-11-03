@@ -115,6 +115,9 @@ export function createLspManager(options: LspManagerOptions) {
     const { command, args } = resolveCommand(language);
     const client = startLspClient({ command, args, rootPath: repoPath, timeoutMs }).then(
       (startedClient) => {
+        if (servers[language].client !== client) {
+          return startedClient;
+        }
         servers[language] = { state: 'ready', client };
         runningClients.add(startedClient);
         startedClient.onExit((detail) => {
@@ -127,7 +130,9 @@ export function createLspManager(options: LspManagerOptions) {
       },
       (error: unknown) => {
         const detail = error instanceof Error ? error.message : String(error);
-        markUnavailable(language, detail);
+        if (servers[language].client === client) {
+          markUnavailable(language, detail);
+        }
         throw new LspUnavailableError(language, detail);
       },
     );

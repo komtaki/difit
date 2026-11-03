@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLspManager, LspUnavailableError, LspUnsupportedFileError } from './lsp-manager.js';
 
@@ -38,6 +38,7 @@ describe('createLspManager', () => {
   afterEach(async () => {
     await manager.shutdown();
     delete process.env.FAKE_LSP_MODE;
+    delete process.env.FAKE_LSP_INITIALIZE_DELAY_MS;
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 
@@ -175,6 +176,20 @@ describe('createLspManager', () => {
     await manager.definition({ filePath: 'src/a.ts', line: 2, character: 3 });
 
     await manager.shutdown();
+
+    expect(manager.status()).toContainEqual({ language: 'typescript', state: 'idle' });
+  });
+
+  it('stays idle when a server finishes starting during shutdown', async () => {
+    process.env.FAKE_LSP_INITIALIZE_DELAY_MS = '300';
+    setup();
+    const request = manager.definition({ filePath: 'src/a.ts', line: 2, character: 3 });
+    await vi.waitFor(() =>
+      expect(manager.status()).toContainEqual({ language: 'typescript', state: 'starting' }),
+    );
+
+    await manager.shutdown();
+    await request.catch(() => undefined);
 
     expect(manager.status()).toContainEqual({ language: 'typescript', state: 'idle' });
   });
