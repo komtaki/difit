@@ -234,6 +234,37 @@ describe('App Component - Clear Comments Functionality', () => {
         });
       });
     });
+
+    it('should count only threads that the stdout output includes', async () => {
+      const humanThread = createMockThread({
+        id: 'human',
+        filePath: 'test.ts',
+        line: 10,
+        body: 'Human comment',
+      });
+      const finding = { reviewer: 'correctness', severity: 'warn', title: 'T' } as const;
+      mockComments = [
+        humanThread,
+        {
+          ...createMockThread({ id: 'explanation', filePath: 'test.ts', line: 11, body: 'E' }),
+          kind: 'explanation',
+        },
+        {
+          ...createMockThread({ id: 'undecided', filePath: 'test.ts', line: 12, body: 'U' }),
+          kind: 'finding',
+          finding,
+        },
+        {
+          ...createMockThread({ id: 'adopted', filePath: 'test.ts', line: 13, body: 'A' }),
+          kind: 'finding',
+          finding: { ...finding, decision: 'adopted' },
+        },
+      ];
+
+      renderApp();
+
+      expect(await screen.findByText('Copy All Prompt (2)')).toBeInTheDocument();
+    });
   });
 
   describe('Cleanup All Prompt Button', () => {

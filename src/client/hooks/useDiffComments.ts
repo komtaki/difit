@@ -17,6 +17,7 @@ import {
 } from '../../utils/commentFormatting';
 import { createId } from '../../utils/createId';
 import { mergeCommentImports } from '../../utils/commentImports';
+import { selectThreadsForOutput } from '../../utils/reviewOutput';
 import { storageService } from '../services/StorageService';
 import { getLanguageFromPath } from '../utils/diffUtils';
 
@@ -456,7 +457,10 @@ export function useDiffComments(
 
   const generateAllCommentsPrompt = useCallback(
     (context?: CommentPromptDiffContext): string => {
-      return formatAllCommentThreadsPrompt(threads.map(normalizeThread), context);
+      return formatAllCommentThreadsPrompt(
+        selectThreadsForOutput(threads).map(normalizeThread),
+        context,
+      );
     },
     [threads],
   );

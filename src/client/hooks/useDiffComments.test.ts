@@ -217,6 +217,61 @@ const next = true;
       expect(prompt).toContain('SUGGESTED:');
       expect(prompt).toContain('const next = true;');
     });
+
+    it('should include AI threads with the same selection rule as stdout output', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+      const timestamp = '2024-01-01T00:00:00.000Z';
+      const createThread = (
+        id: string,
+        line: number,
+        review: Pick<DiffCommentThread, 'kind' | 'finding'>,
+        replies: string[] = [],
+      ): DiffCommentThread => ({
+        id,
+        filePath: 'src/a.ts',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        position: { side: 'new', line },
+        messages: [id, ...replies].map((body, index) => ({
+          id: `${id}-${index}`,
+          body,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+        ...review,
+      });
+      const finding = { reviewer: 'correctness', severity: 'warn', title: 'T' } as const;
+
+      act(() => {
+        result.current.replaceThreads([
+          createThread('human', 1, {}),
+          createThread('silent explanation', 2, { kind: 'explanation' }),
+          createThread('replied explanation', 3, { kind: 'explanation' }, ['why?']),
+          createThread('undecided finding', 4, { kind: 'finding', finding }),
+          createThread('adopted finding', 5, {
+            kind: 'finding',
+            finding: { ...finding, decision: 'adopted' },
+          }),
+          createThread('replied finding', 6, { kind: 'finding', finding }, ['not sure']),
+        ]);
+      });
+
+      expect(result.current.generateAllCommentsPrompt()).toBe(`src/a.ts:L1
+human
+=====
+src/a.ts:L3
+replied explanation
+Reply 1 (Unknown)
+why?
+=====
+src/a.ts:L5
+[AI:correctness] adopted finding
+=====
+src/a.ts:L6
+replied finding
+Reply 1 (Unknown)
+not sure`);
+    });
   });
 
   describe('comment CRUD operations', () => {
