@@ -478,6 +478,40 @@ describe('CommentThreadCard', () => {
       expect(screen.getByText('correctness')).toBeInTheDocument();
     });
 
+    it('lets the finding header wrap instead of overlapping in narrow cards', () => {
+      renderReviewCard(toDiffThread('finding', baseFinding));
+
+      const title = screen.getByText('Missing null check');
+      const headerInfo = title.parentElement;
+      const header = headerInfo?.parentElement;
+      const actions = screen.getByRole('button', { name: 'Adopt' }).parentElement;
+
+      expect(title).not.toHaveClass('truncate');
+      expect(title).toHaveClass('min-w-0', 'break-words');
+      expect(headerInfo).toHaveClass('flex-wrap');
+      expect(header).toHaveClass('flex-wrap');
+      expect(actions).toHaveClass('flex-wrap');
+      expect(actions).toContainElement(screen.getByTitle('Copy thread prompt for AI coding agent'));
+    });
+
+    it('lets the explanation header wrap instead of squeezing the file label', () => {
+      renderReviewCard(toDiffThread('explanation'));
+
+      const headerInfo = screen.getByRole('button', { name: 'Explanation' }).parentElement;
+
+      expect(headerInfo).toHaveClass('flex-wrap');
+      expect(headerInfo?.parentElement).toHaveClass('flex-wrap');
+    });
+
+    it('keeps the single-line header for human comments', () => {
+      renderReviewCard({ ...toDiffThread('comment'), kind: undefined });
+
+      const headerInfo = screen.getByRole('button', { name: 'Collapse thread' }).parentElement;
+
+      expect(headerInfo).not.toHaveClass('flex-wrap');
+      expect(headerInfo?.parentElement).not.toHaveClass('flex-wrap');
+    });
+
     it('adopts and rejects a finding', async () => {
       const user = userEvent.setup();
       const onSetFindingDecision = renderReviewCard(toDiffThread('finding', baseFinding));

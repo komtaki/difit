@@ -239,6 +239,7 @@ export function CommentThreadCard({
   const review = useThreadReview(thread.id);
   const kind = review?.kind ?? 'comment';
   const finding = kind === 'finding' ? review?.finding : undefined;
+  const isReviewThread = kind !== 'comment';
   const [isCopied, setIsCopied] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -275,8 +276,16 @@ export function CommentThreadCard({
       }`}
       onClick={onClick}
     >
-      <div className={`flex items-center justify-between gap-3 ${isCollapsed ? '' : 'mb-3'}`}>
-        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-github-text-secondary">
+      <div
+        className={`flex items-center justify-between ${
+          isReviewThread ? 'flex-wrap gap-x-3 gap-y-2' : 'gap-3'
+        } ${isCollapsed ? '' : 'mb-3'}`}
+      >
+        <div
+          className={`flex min-w-0 flex-1 items-center gap-2 text-xs text-github-text-secondary ${
+            isReviewThread ? 'flex-wrap' : ''
+          }`}
+        >
           <button
             type="button"
             onClick={toggleCollapsed}
@@ -299,7 +308,7 @@ export function CommentThreadCard({
           {finding && (
             <>
               <SeverityBadge severity={finding.severity} />
-              <span className="min-w-0 truncate font-semibold text-github-text-primary">
+              <span className="min-w-0 break-words font-semibold text-github-text-primary">
                 {finding.title}
               </span>
               <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--color-finding-bg)] px-2 text-[10px] font-medium text-[var(--color-finding-text)]">
@@ -346,7 +355,11 @@ export function CommentThreadCard({
           )}
         </div>
         {!isCollapsed && (
-          <div className="flex items-center gap-2">
+          <div
+            className={`flex items-center gap-2 ${
+              isReviewThread ? 'ml-auto flex-wrap justify-end' : ''
+            }`}
+          >
             {finding && review && (
               <FindingDecisionButtons finding={finding} onChange={review.setDecision} />
             )}
