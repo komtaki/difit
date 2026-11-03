@@ -197,6 +197,28 @@ describe('startLspClient', () => {
     expect(message.length).toBeLessThan(2100);
   });
 
+  it('starts a .cmd shim through the shell on Windows', async () => {
+    const originalPlatform = process.platform;
+    const originalComSpec = process.env.ComSpec;
+    delete process.env.ComSpec;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      await expect(
+        startLspClient({
+          command: join(rootPath, 'node_modules', '.bin', 'typescript-language-server.cmd'),
+          args: ['--stdio'],
+          rootPath,
+          timeoutMs: 2000,
+        }),
+      ).rejects.toThrow(/spawn cmd\.exe ENOENT/);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+      if (originalComSpec !== undefined) {
+        process.env.ComSpec = originalComSpec;
+      }
+    }
+  });
+
   it('sends shutdown and exit, then reports the exit', async () => {
     client = await start();
     const exited = new Promise<string>((resolve) => client!.onExit(resolve));

@@ -124,10 +124,12 @@ export async function startLspClient(options: {
   rootPath: string;
   timeoutMs: number;
 }): Promise<LspClient> {
-  const child = spawn(options.command, options.args, {
-    cwd: options.rootPath,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const needsShell = process.platform === 'win32' && /\.(bat|cmd)$/i.test(options.command);
+  const child = spawn(
+    needsShell ? [`"${options.command}"`, ...options.args].join(' ') : options.command,
+    needsShell ? [] : options.args,
+    { cwd: options.rootPath, stdio: ['pipe', 'pipe', 'pipe'], shell: needsShell },
+  );
   let stderr = '';
   let exitDetail: string | undefined;
   const exitListeners: Array<(detail: string) => void> = [];

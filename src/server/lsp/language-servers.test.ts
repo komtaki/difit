@@ -106,4 +106,53 @@ describe('resolveServerCommand', () => {
 
     expect(resolveServerCommand('ruby', repoPath)).toEqual({ command: 'ruby-lsp', args: [] });
   });
+
+  describe('on Windows', () => {
+    const originalPlatform = process.platform;
+    const originalPathExt = process.env.PATHEXT;
+
+    beforeEach(() => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+      if (originalPathExt === undefined) {
+        delete process.env.PATHEXT;
+      } else {
+        process.env.PATHEXT = originalPathExt;
+      }
+    });
+
+    it('prefers the .cmd shim of the repository typescript-language-server', async () => {
+      const binDirectory = join(repoPath, 'node_modules', '.bin');
+      await addExecutable(binDirectory, 'typescript-language-server');
+      const shim = await addExecutable(binDirectory, 'typescript-language-server.cmd');
+
+      expect(resolveServerCommand('typescript', repoPath)).toEqual({
+        command: shim,
+        args: ['--stdio'],
+      });
+    });
+
+    it('resolves a server on PATH through PATHEXT', async () => {
+      const shim = await addExecutable(binPath, 'pyright-langserver.cmd');
+
+      expect(resolveServerCommand('python', repoPath)).toEqual({
+        command: shim,
+        args: ['--stdio'],
+      });
+    });
+
+    it('detects mise.exe on PATH', async () => {
+      await fs.writeFile(join(repoPath, 'mise.toml'), '[tools]\n');
+      await addExecutable(binPath, 'mise.exe');
+
+      expect(resolveServerCommand('ruby', repoPath)).toEqual({
+        command: 'mise',
+        args: ['x', '--', 'ruby-lsp'],
+      });
+    });
+  });
 });

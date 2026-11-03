@@ -44,10 +44,32 @@ function isExecutable(filePath: string): boolean {
   }
 }
 
-function isOnPath(command: string): boolean {
-  return (process.env.PATH ?? '')
-    .split(delimiter)
-    .some((directory) => directory.length > 0 && isExecutable(join(directory, command)));
+function executableNames(command: string): string[] {
+  if (process.platform !== 'win32') {
+    return [command];
+  }
+  return (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .filter((extension) => extension.length > 0)
+    .map((extension) => `${command}${extension.toLowerCase()}`);
+}
+
+function findExecutable(directory: string, command: string): string | null {
+  return (
+    executableNames(command)
+      .map((name) => join(directory, name))
+      .find(isExecutable) ?? null
+  );
+}
+
+function findOnPath(command: string): string | null {
+  for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+    const executable = directory.length > 0 ? findExecutable(directory, command) : null;
+    if (executable) {
+      return executable;
+    }
+  }
+  return null;
 }
 
 export function resolveServerCommand(
@@ -55,13 +77,15 @@ export function resolveServerCommand(
   repoPath: string,
 ): { command: string; args: string[] } {
   const { command, args } = SERVER_COMMANDS[language];
-  const localBinary = join(repoPath, 'node_modules', '.bin', command);
-  const resolvedCommand =
-    language === 'typescript' && isExecutable(localBinary) ? localBinary : command;
+  const localBinary =
+    language === 'typescript'
+      ? findExecutable(join(repoPath, 'node_modules', '.bin'), command)
+      : null;
 
-  if (existsSync(join(repoPath, 'mise.toml')) && isOnPath('mise')) {
-    return { command: 'mise', args: ['x', '--', resolvedCommand, ...args] };
+  if (existsSync(join(repoPath, 'mise.toml')) && findOnPath('mise')) {
+    return { command: 'mise', args: ['x', '--', localBinary ?? command, ...args] };
   }
 
-  return { command: resolvedCommand, args: [...args] };
+  const pathBinary = process.platform === 'win32' ? findOnPath(command) : null;
+  return { command: localBinary ?? pathBinary ?? command, args: [...args] };
 }
