@@ -12,10 +12,11 @@ describe('createLspManager', () => {
   let repoPath: string;
   let manager: ReturnType<typeof createLspManager>;
 
-  function setup(command: string = process.execPath, timeoutMs = 2000) {
+  function setup(command: string = process.execPath, timeoutMs = 2000, retryCooldownMs?: number) {
     manager = createLspManager({
       repoPath,
       timeoutMs,
+      ...(retryCooldownMs === undefined ? {} : { retryCooldownMs }),
       resolveCommand: () => ({
         command,
         args: command === process.execPath ? [fakeServerPath] : [],
@@ -126,6 +127,35 @@ describe('createLspManager', () => {
     const typescript = manager.status().find((server) => server.language === 'typescript');
     expect(typescript).toMatchObject({ state: 'unavailable' });
     expect(typescript?.detail).toContain('fatal: cannot start');
+  });
+
+  it('does not restart an unavailable server during the cooldown', async () => {
+    process.env.FAKE_LSP_MODE = 'crash';
+    setup();
+    await expect(
+      manager.definition({ filePath: 'src/a.ts', line: 1, character: 0 }),
+    ).rejects.toBeInstanceOf(LspUnavailableError);
+
+    delete process.env.FAKE_LSP_MODE;
+
+    await expect(
+      manager.definition({ filePath: 'src/a.ts', line: 1, character: 0 }),
+    ).rejects.toThrow(/fatal: cannot start/);
+  });
+
+  it('restarts an unavailable server on the next request after the cooldown', async () => {
+    process.env.FAKE_LSP_MODE = 'crash';
+    setup(process.execPath, 2000, 0);
+    await expect(
+      manager.definition({ filePath: 'src/a.ts', line: 1, character: 0 }),
+    ).rejects.toBeInstanceOf(LspUnavailableError);
+
+    delete process.env.FAKE_LSP_MODE;
+
+    await expect(
+      manager.definition({ filePath: 'src/a.ts', line: 2, character: 3 }),
+    ).resolves.toHaveLength(1);
+    expect(manager.status()).toContainEqual({ language: 'typescript', state: 'ready' });
   });
 
   it('shares a single server start between concurrent requests', async () => {

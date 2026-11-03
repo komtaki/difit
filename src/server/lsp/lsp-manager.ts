@@ -20,6 +20,7 @@ import {
 import { startLspClient, type LspClient, type LspRawLocation } from './lsp-client.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_RETRY_COOLDOWN_MS = 30_000;
 const PREVIEW_CONTEXT_LINES = 3;
 
 export class LspUnsupportedFileError extends Error {
@@ -40,12 +41,14 @@ interface ServerEntry {
   state: LspServerState;
   detail?: string;
   client?: Promise<LspClient>;
+  retryAfter?: number;
 }
 
 interface LspManagerOptions {
   repoPath: string;
   isInDiff: (filePath: string) => boolean;
   timeoutMs?: number;
+  retryCooldownMs?: number;
   resolveCommand?: (language: LspLanguage) => { command: string; args: string[] };
 }
 
@@ -76,6 +79,7 @@ export function createLspManager(options: LspManagerOptions) {
   const repoPath = resolve(options.repoPath);
   const repositoryRoots = [...new Set([repoPath, resolveRealPath(repoPath)])];
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const retryCooldownMs = options.retryCooldownMs ?? DEFAULT_RETRY_COOLDOWN_MS;
   const resolveCommand =
     options.resolveCommand ?? ((language: LspLanguage) => resolveServerCommand(language, repoPath));
   const createIdleServers = (): Record<LspLanguage, ServerEntry> => ({
@@ -93,12 +97,12 @@ export function createLspManager(options: LspManagerOptions) {
   };
 
   const markUnavailable = (language: LspLanguage, detail: string) => {
-    servers[language] = { state: 'unavailable', detail };
+    servers[language] = { state: 'unavailable', detail, retryAfter: Date.now() + retryCooldownMs };
   };
 
   const getClient = (language: LspLanguage): Promise<LspClient> => {
     const entry = servers[language];
-    if (entry.state === 'unavailable') {
+    if (entry.retryAfter !== undefined && Date.now() < entry.retryAfter) {
       return Promise.reject(new LspUnavailableError(language, entry.detail));
     }
     if (entry.client) {
