@@ -33,6 +33,12 @@ import {
 } from './decision-store.js';
 import { FileWatcherService } from './file-watcher.js';
 import { GitDiffParser } from './git-diff.js';
+import { LspRequestTimeoutError } from './lsp/lsp-client.js';
+import {
+  createLspManager,
+  LspUnavailableError,
+  LspUnsupportedFileError,
+} from './lsp/lsp-manager.js';
 import { createReviewContext } from './review-context.js';
 import { parseUserSettingsPatch, readUserConfig, updateUserClientSettings } from './user-config.js';
 
@@ -50,6 +56,7 @@ import {
   type RevisionsResponse,
   type ThreadCommentImport,
 } from '@/types/diff.js';
+import { type LspPositionRequest, type LspStatusResponse } from '@/types/lsp.js';
 import { type ReviewerStatus } from '@/types/review.js';
 import {
   createDiffSelection,
@@ -74,6 +81,7 @@ interface ServerOptions {
 }
 
 const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
+const LSP_TARGET_COMMITISHES = new Set(['HEAD', 'working', '.']);
 const MAX_DIFF_CACHE_ENTRIES = 8;
 
 function createDiffCacheKey(selection: DiffSelection, ignoreWhitespace: boolean) {
@@ -240,6 +248,7 @@ export async function startServer(
 
   // Track current revisions for cache invalidation
   let currentSelection = initialSelection;
+  let currentDiffFilePaths = new Set(initialDiffData.files.map((file) => file.path));
   let currentCommentSelection = createResolvedCommentSelection(
     initialDiffData,
     initialSelection,
@@ -441,6 +450,7 @@ export async function startServer(
     }
 
     currentSelection = requestedSelection;
+    currentDiffFilePaths = new Set(responseDiffData.files.map((file) => file.path));
 
     currentCommentSelection = createResolvedCommentSelection(
       responseDiffData,
@@ -1001,6 +1011,119 @@ export async function startServer(
     res.json({ success: true });
   });
 
+  const lspManager = createLspManager({
+    repoPath: repositoryPath,
+    isInDiff: (filePath) => currentDiffFilePaths.has(filePath),
+  });
+
+  function getLspDisabledReason(): string | undefined {
+    if (options.stdinDiff) {
+      return 'Symbol lookup is not available for stdin or --pr diffs';
+    }
+    if (!LSP_TARGET_COMMITISHES.has(currentSelection.targetCommitish)) {
+      return 'Symbol lookup needs the checked-out code on the new side (HEAD, working, or .)';
+    }
+    return undefined;
+  }
+
+  function parseLspPositionRequest(body: unknown): LspPositionRequest | null {
+    const payload = parseJsonBody(body);
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+    const { filePath, line, character } = payload as Record<string, unknown>;
+    const filePathResult = parseRepositoryRelativePath(filePath);
+    if (!filePathResult.ok) {
+      return null;
+    }
+    if (typeof line !== 'number' || !Number.isInteger(line) || line < 1) {
+      return null;
+    }
+    if (typeof character !== 'number' || !Number.isInteger(character) || character < 0) {
+      return null;
+    }
+    return { filePath: filePathResult.path, line, character };
+  }
+
+  function getLspErrorStatus(error: unknown): number {
+    if (error instanceof LspUnsupportedFileError) {
+      return 400;
+    }
+    if (error instanceof LspUnavailableError) {
+      return 503;
+    }
+    if (error instanceof LspRequestTimeoutError) {
+      return 504;
+    }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return 404;
+    }
+    return 500;
+  }
+
+  app.get('/api/lsp/status', (_req, res) => {
+    const reason = getLspDisabledReason();
+    const response: LspStatusResponse = {
+      enabled: reason === undefined,
+      ...(reason ? { reason } : {}),
+      servers: lspManager.status(),
+    };
+    res.json(response);
+  });
+
+  for (const method of ['definition', 'references'] as const) {
+    app.post(`/api/lsp/${method}`, async (req, res) => {
+      const reason = getLspDisabledReason();
+      if (reason) {
+        res.status(409).json({ error: reason });
+        return;
+      }
+
+      let request: LspPositionRequest | null;
+      try {
+        request = parseLspPositionRequest(req.body);
+      } catch {
+        request = null;
+      }
+      if (!request) {
+        res.status(400).json({ error: 'Invalid symbol lookup payload' });
+        return;
+      }
+
+      try {
+        res.json({ locations: await lspManager[method](request) });
+      } catch (error) {
+        res.status(getLspErrorStatus(error)).json({
+          error: error instanceof Error ? error.message : 'Symbol lookup failed',
+        });
+      }
+    });
+  }
+
+  app.get('/api/lsp/file', async (req, res) => {
+    const reason = getLspDisabledReason();
+    if (reason) {
+      res.status(409).json({ error: reason });
+      return;
+    }
+
+    const filePathResult = parseRepositoryRelativePath(req.query.path);
+    if (!filePathResult.ok) {
+      res.status(400).json({ error: filePathResult.error });
+      return;
+    }
+
+    try {
+      const content = await parser.getBlobContent(filePathResult.path, 'working');
+      res.json({ content: content.toString('utf8') });
+    } catch (error) {
+      const isOutside = error instanceof Error && error.message === 'File path outside repository';
+      res
+        .status(isOutside ? 400 : 404)
+        .json({ error: isOutside ? error.message : 'File not found' });
+    }
+  });
+
   app.get('/api/user-settings', async (_req, res) => {
     const config = await readUserConfig();
     res.json(config);
@@ -1186,6 +1309,7 @@ export async function startServer(
 
           // Stop file watcher
           await fileWatcher.stop();
+          await lspManager.shutdown();
 
           outputFinalComments();
           process.exit(0);

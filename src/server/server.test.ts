@@ -2037,6 +2037,143 @@ describe('Server Integration Tests', () => {
     });
   });
 
+  describe('Language server API', () => {
+    let repoPath: string;
+    const originalPath = process.env.PATH;
+
+    async function startLspServer(preferredPort: number, targetCommitish = 'HEAD') {
+      const result = await startServer({
+        selection: { targetCommitish, baseCommitish: 'HEAD^' },
+        preferredPort,
+        repoPath,
+      });
+      servers.push(result.server);
+      return result.port;
+    }
+
+    const lookup = (port: number, method: string, body: unknown) =>
+      fetch(`http://localhost:${port}/api/lsp/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    beforeEach(async () => {
+      repoPath = await fs.mkdtemp(join(tmpdir(), 'difit-server-lsp-'));
+      await fs.mkdir(join(repoPath, 'src'));
+      await fs.writeFile(join(repoPath, 'src', 'a.ts'), 'export const a = 1;\n');
+      process.env.PATH = join(repoPath, 'empty-bin');
+    });
+
+    afterEach(async () => {
+      process.env.PATH = originalPath;
+      await fs.rm(repoPath, { recursive: true, force: true });
+    });
+
+    it.each(['HEAD', 'working', '.'])('is enabled when the target is %s', async (target) => {
+      const port = await startLspServer(9130, target);
+
+      const response = await fetch(`http://localhost:${port}/api/lsp/status`);
+
+      expect(await response.json()).toEqual({
+        enabled: true,
+        servers: [
+          { language: 'ruby', state: 'idle' },
+          { language: 'typescript', state: 'idle' },
+          { language: 'python', state: 'idle' },
+        ],
+      });
+    });
+
+    it('is disabled for other targets and refuses lookups', async () => {
+      const port = await startLspServer(9135, 'staged');
+
+      const status = (await (await fetch(`http://localhost:${port}/api/lsp/status`)).json()) as any;
+      const response = await lookup(port, 'definition', {
+        filePath: 'src/a.ts',
+        line: 1,
+        character: 13,
+      });
+      const file = await fetch(`http://localhost:${port}/api/lsp/file?path=src/a.ts`);
+
+      expect(status.enabled).toBe(false);
+      expect(status.reason).toEqual(expect.any(String));
+      expect(response.status).toBe(409);
+      expect(file.status).toBe(409);
+    });
+
+    it('is disabled for stdin diffs', async () => {
+      const result = await startServer({
+        stdinDiff: 'diff --git a/a b/a',
+        preferredPort: 9140,
+        repoPath,
+      });
+      servers.push(result.server);
+
+      const response = await fetch(`http://localhost:${result.port}/api/lsp/status`);
+
+      expect(((await response.json()) as any).enabled).toBe(false);
+    });
+
+    it.each([
+      { filePath: '../outside.ts', line: 1, character: 0 },
+      { filePath: 'src/a.ts', line: 0, character: 0 },
+      { filePath: 'src/a.ts', line: 1, character: -1 },
+      { filePath: 'src/a.ts', line: 1.5, character: 0 },
+      { line: 1, character: 0 },
+    ])('rejects an invalid lookup body %j', async (body) => {
+      const port = await startLspServer(9145);
+
+      const response = await lookup(port, 'references', body);
+
+      expect(response.status).toBe(400);
+    });
+
+    it('rejects a file no language server handles', async () => {
+      const port = await startLspServer(9150);
+
+      const response = await lookup(port, 'definition', {
+        filePath: 'README.md',
+        line: 1,
+        character: 0,
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('reports a missing language server as unavailable without breaking the diff', async () => {
+      const port = await startLspServer(9155);
+
+      const response = await lookup(port, 'definition', {
+        filePath: 'src/a.ts',
+        line: 1,
+        character: 13,
+      });
+      const status = (await (await fetch(`http://localhost:${port}/api/lsp/status`)).json()) as any;
+      const diff = await fetch(`http://localhost:${port}/api/diff`);
+
+      expect(response.status).toBe(503);
+      expect(status.servers).toContainEqual({
+        language: 'typescript',
+        state: 'unavailable',
+        detail: expect.stringContaining('ENOENT'),
+      });
+      expect(diff.status).toBe(200);
+    });
+
+    it('serves repository files from the working tree', async () => {
+      const port = await startLspServer(9160);
+      parserInstances.at(-1).getBlobContent.mockResolvedValue(Buffer.from('export const a = 1;\n'));
+
+      const response = await fetch(`http://localhost:${port}/api/lsp/file?path=src/a.ts`);
+      const outside = await fetch(`http://localhost:${port}/api/lsp/file?path=../etc/passwd`);
+
+      expect(await response.json()).toEqual({ content: 'export const a = 1;\n' });
+      expect(parserInstances.at(-1).getBlobContent).toHaveBeenCalledWith('src/a.ts', 'working');
+      expect(outside.status).toBe(400);
+    });
+  });
+
   describe('Clear Comments functionality', () => {
     it('includes clearComments flag in diff response when provided', async () => {
       const { port, server } = await startServer({
