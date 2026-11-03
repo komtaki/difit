@@ -165,4 +165,22 @@ describe('FileList', () => {
     fireEvent.click(checkbox);
     expect(onToggleFolderReviewed).toHaveBeenCalledWith('src', false);
   });
+
+  it('shows the number of open AI findings next to each file', () => {
+    render(
+      <FileList
+        files={[createFile('src/a.ts'), createFile('src/b.ts')]}
+        onScrollToFile={vi.fn()}
+        comments={[]}
+        findingCounts={new Map([['src/a.ts', 2]])}
+        reviewedFiles={new Set()}
+        onToggleReviewed={vi.fn()}
+        onToggleFolderReviewed={vi.fn()}
+        selectedFileIndex={null}
+      />,
+    );
+
+    expect(screen.getByLabelText('2 AI findings')).toHaveTextContent('2');
+    expect(screen.getAllByLabelText(/AI finding/)).toHaveLength(1);
+  });
 });

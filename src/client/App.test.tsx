@@ -719,7 +719,10 @@ describe('App Component - Diff Mode Persistence', () => {
 
     await waitFor(() => {
       // 4 calls: initial /api/diff, /api/revisions, initial /api/comments sync, and refresh /api/diff
-      expect(mockGlobalFetch).toHaveBeenCalledTimes(4);
+      const diffAndCommentCalls = mockGlobalFetch.mock.calls.filter(
+        ([url]) => !['/api/overview', '/api/reviewers', '/api/lsp/status'].includes(String(url)),
+      );
+      expect(diffAndCommentCalls).toHaveLength(4);
     });
 
     await waitFor(() => {
@@ -1076,5 +1079,314 @@ describe('App Component - Mobile sidebar auto-close', () => {
     await waitFor(() => {
       expect(toggleButton).toHaveAttribute('aria-expanded', 'false');
     });
+  });
+});
+
+describe('App Component - Review extensions', () => {
+  const timestamp = '2024-01-01T00:00:00.000Z';
+
+  const createReviewThread = (
+    id: string,
+    review: Pick<DiffCommentThread, 'kind' | 'finding'>,
+  ): DiffCommentThread => ({
+    ...createMockThread({ id, filePath: 'test.ts', line: 3, body: `Body ${id}`, author: 'AI' }),
+    ...review,
+  });
+
+  const mockReviewFetch = (routes: Record<string, unknown>) => {
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const path = String(input).split('?')[0] ?? '';
+      if (path in routes) {
+        return Promise.resolve({ ok: true, json: async () => routes[path] } as Response);
+      }
+      if (path === '/api/revisions') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ specialOptions: [], branches: [], commits: [] }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
+    });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+  });
+
+  it('keeps the original layout without an overview or AI findings', async () => {
+    mockReviewFetch({ '/api/overview': { markdown: null }, '/api/reviewers': { reviewers: [] } });
+
+    renderApp();
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url))).toContain(
+        '/api/reviewers',
+      );
+    });
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Reviewing \d/)).not.toBeInTheDocument();
+  });
+
+  it('opens on the overview tab and switches to the diff', async () => {
+    mockReviewFetch({
+      '/api/overview': { markdown: '# Change summary' },
+      '/api/reviewers': { reviewers: [] },
+    });
+
+    renderApp();
+
+    expect(await screen.findByRole('heading', { name: 'Change summary' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Files changed' }));
+
+    expect(screen.queryByRole('heading', { name: 'Change summary' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Files changed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('counts open findings and starts on the diff when there is no overview', async () => {
+    mockComments = [
+      createReviewThread('f1', {
+        kind: 'finding',
+        finding: { reviewer: 'security', severity: 'error', title: 'Injection' },
+      }),
+      createReviewThread('f2', {
+        kind: 'finding',
+        finding: { reviewer: 'security', severity: 'warn', title: 'Noise', decision: 'rejected' },
+      }),
+      createReviewThread('e1', { kind: 'explanation' }),
+    ];
+    mockReviewFetch({ '/api/overview': { markdown: null }, '/api/reviewers': { reviewers: [] } });
+
+    renderApp();
+
+    expect(await screen.findByRole('tab', { name: 'AI review (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Files changed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByLabelText('1 AI finding')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'AI review (1)' }));
+
+    expect(screen.getByText('Injection')).toBeInTheDocument();
+    expect(screen.queryByText('Noise')).not.toBeInTheDocument();
+  });
+
+  it('shows reviewer progress and asks before leaving while reviewers run', async () => {
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': {
+        reviewers: [
+          { name: 'security', status: 'running', updatedAt: timestamp },
+          { name: 'correctness', status: 'done', updatedAt: timestamp },
+        ],
+      },
+    });
+
+    renderApp();
+
+    expect(await screen.findByText('Reviewing 1/2')).toBeInTheDocument();
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('keeps the server finding history when merging locally stored threads', async () => {
+    const localFinding = createReviewThread('f1', {
+      kind: 'finding',
+      finding: { reviewer: 'security', severity: 'error', title: 'Injection', decision: 'adopted' },
+    });
+    mockComments = [localFinding];
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': { reviewers: [] },
+      '/api/comments-json': {
+        version: 1,
+        threads: [
+          {
+            ...localFinding,
+            finding: {
+              reviewer: 'security',
+              severity: 'error',
+              title: 'Injection',
+              fingerprint: 'fp-1',
+              previousDecision: 'adopted',
+            },
+          },
+        ],
+      },
+    });
+
+    renderApp();
+
+    await waitFor(() => {
+      expect(mockReplaceThreads).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'f1',
+          finding: {
+            reviewer: 'security',
+            severity: 'error',
+            title: 'Injection',
+            decision: 'adopted',
+            fingerprint: 'fp-1',
+            previousDecision: 'adopted',
+          },
+        }),
+      ]);
+    });
+  });
+});
+
+describe('App Component - Symbol navigation', () => {
+  const diffWithCode: DiffResponse = {
+    ...mockDiffResponse,
+    files: [
+      {
+        path: 'src/a.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        chunks: [
+          {
+            header: '@@ -1,1 +1,2 @@',
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 2,
+            lines: [
+              {
+                type: 'normal',
+                content: 'import { other } from "./b";',
+                oldLineNumber: 1,
+                newLineNumber: 1,
+              },
+              { type: 'add', content: 'const value = other;', newLineNumber: 2 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const mockLspFetch = (enabled: boolean) => {
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const path = String(input).split('?')[0] ?? '';
+      const json = (body: unknown) =>
+        Promise.resolve({ ok: true, json: async () => body } as Response);
+      if (path === '/api/lsp/status') {
+        return json({
+          enabled,
+          reason: enabled ? undefined : 'Not a working tree diff',
+          servers: [{ language: 'typescript', state: 'ready' }],
+        });
+      }
+      if (path === '/api/lsp/definition') {
+        return json({
+          locations: [
+            {
+              filePath: 'src/b.ts',
+              line: 3,
+              character: 13,
+              inDiff: false,
+              preview: ['export const other = 1;'],
+              previewStartLine: 3,
+            },
+          ],
+        });
+      }
+      if (path === '/api/lsp/references') {
+        return json({ locations: [] });
+      }
+      if (path === '/api/revisions') {
+        return json({ specialOptions: [], branches: [], commits: [] });
+      }
+      if (path === '/api/overview' || path === '/api/reviewers') {
+        return json({});
+      }
+      return json(diffWithCode);
+    });
+  };
+
+  const findWordToken = async (word: string) => {
+    let token: Element | null = null;
+    await waitFor(() => {
+      token = document.querySelector(`[data-symbol-line="2"] .word-token[data-word="${word}"]`);
+      expect(token).not.toBeNull();
+    });
+    return token as unknown as Element;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+  });
+
+  it('looks up the clicked symbol with Cmd+click and shows the symbol panel', async () => {
+    mockLspFetch(true);
+    renderApp();
+
+    const token = await findWordToken('other');
+    await waitFor(() => {
+      expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url))).toContain(
+        '/api/lsp/status',
+      );
+    });
+    fireEvent.click(token, { metaKey: true });
+
+    expect(await screen.findByRole('region', { name: 'Definition' })).toBeInTheDocument();
+    expect(screen.getByText('src/b.ts:3')).toBeInTheDocument();
+    const definitionRequest = vi
+      .mocked(global.fetch)
+      .mock.calls.find(([url]) => url === '/api/lsp/definition')?.[1];
+    expect(JSON.parse(String(definitionRequest?.body))).toEqual({
+      filePath: 'src/a.ts',
+      line: 2,
+      character: 14,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close symbol panel' }));
+    expect(screen.queryByRole('region', { name: 'Definition' })).not.toBeInTheDocument();
+  });
+
+  it('opens locations outside the diff in a read-only preview', async () => {
+    mockLspFetch(true);
+    renderApp();
+
+    const token = await findWordToken('other');
+    await waitFor(() => {
+      expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url))).toContain(
+        '/api/lsp/status',
+      );
+    });
+    fireEvent.click(token, { ctrlKey: true });
+    fireEvent.click(await screen.findByRole('button', { name: 'src/b.ts:3' }));
+
+    expect(await screen.findByRole('dialog', { name: 'src/b.ts:3' })).toBeInTheDocument();
+  });
+
+  it('does nothing on Cmd+click when the language servers are disabled', async () => {
+    mockLspFetch(false);
+    renderApp();
+
+    const token = await findWordToken('other');
+    await waitFor(() => {
+      expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url))).toContain(
+        '/api/lsp/status',
+      );
+    });
+    fireEvent.click(token, { metaKey: true });
+
+    expect(screen.queryByRole('region', { name: 'Definition' })).not.toBeInTheDocument();
+    expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url))).not.toContain(
+      '/api/lsp/definition',
+    );
   });
 });

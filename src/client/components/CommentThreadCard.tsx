@@ -1,12 +1,14 @@
 import { Check, ChevronDown, ChevronRight, Copy, Edit2, MessageSquare, Trash2 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
-import { type CommentThread, type DiffCommentMessage } from '../../types/diff';
+import { type CommentThread, type DiffCommentMessage, type ThreadKind } from '../../types/diff';
+import { useThreadReview } from '../contexts/ReviewThreadContext';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { copyTextToClipboard } from '../utils/clipboard';
 
 import { CommentBodyRenderer } from './CommentBodyRenderer';
 import { CommentForm } from './CommentForm';
+import { FindingDecisionButtons, PreviousDecisionBadge, SeverityBadge } from './FindingControls';
 import type { AppearanceSettings } from './SettingsModal';
 
 interface ThreadMessageItemProps {
@@ -187,6 +189,28 @@ function ThreadMessageItem({
   );
 }
 
+const CARD_BORDER_CLASS: Record<ThreadKind, string> = {
+  comment: 'border-yellow-600/50 border-l-yellow-400',
+  explanation:
+    'border-[var(--color-explanation-border)] border-l-[var(--color-explanation-accent)]',
+  finding: 'border-[var(--color-finding-border)] border-l-[var(--color-finding-accent)]',
+};
+
+const PATH_LABEL_STYLE: Record<ThreadKind, React.CSSProperties> = {
+  comment: {
+    backgroundColor: 'var(--color-yellow-path-bg)',
+    color: 'var(--color-yellow-path-text)',
+  },
+  explanation: {
+    backgroundColor: 'var(--color-explanation-bg)',
+    color: 'var(--color-explanation-text)',
+  },
+  finding: {
+    backgroundColor: 'var(--color-finding-bg)',
+    color: 'var(--color-finding-text)',
+  },
+};
+
 interface CommentThreadCardProps {
   thread: CommentThread;
   showAuthorBadges?: boolean;
@@ -212,6 +236,9 @@ export function CommentThreadCard({
   onClick,
   syntaxTheme,
 }: CommentThreadCardProps) {
+  const review = useThreadReview(thread.id);
+  const kind = review?.kind ?? 'comment';
+  const finding = kind === 'finding' ? review?.finding : undefined;
   const [isCopied, setIsCopied] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -242,7 +269,8 @@ export function CommentThreadCard({
   return (
     <div
       id={`comment-thread-${thread.id}`}
-      className={`rounded-md border border-yellow-600/50 border-l-4 border-l-yellow-400 bg-github-bg-tertiary p-3 shadow-sm transition-all ${
+      data-thread-kind={kind}
+      className={`rounded-md border border-l-4 ${CARD_BORDER_CLASS[kind]} bg-github-bg-tertiary p-3 shadow-sm transition-all ${
         onClick ? 'cursor-pointer hover:shadow-md' : ''
       }`}
       onClick={onClick}
@@ -259,12 +287,32 @@ export function CommentThreadCard({
           >
             {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
           </button>
+          {kind === 'explanation' && (
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              className="shrink-0 font-semibold text-[var(--color-explanation-text)]"
+            >
+              Explanation
+            </button>
+          )}
+          {finding && (
+            <>
+              <SeverityBadge severity={finding.severity} />
+              <span className="min-w-0 truncate font-semibold text-github-text-primary">
+                {finding.title}
+              </span>
+              <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--color-finding-bg)] px-2 text-[10px] font-medium text-[var(--color-finding-text)]">
+                {finding.reviewer}
+              </span>
+              {finding.previousDecision && (
+                <PreviousDecisionBadge decision={finding.previousDecision} />
+              )}
+            </>
+          )}
           <span
             className="font-mono px-1 py-0.5 rounded overflow-hidden text-ellipsis whitespace-nowrap"
-            style={{
-              backgroundColor: 'var(--color-yellow-path-bg)',
-              color: 'var(--color-yellow-path-text)',
-            }}
+            style={PATH_LABEL_STYLE[kind]}
           >
             {thread.file}:{lineLabel}
           </span>
@@ -299,6 +347,9 @@ export function CommentThreadCard({
         </div>
         {!isCollapsed && (
           <div className="flex items-center gap-2">
+            {finding && review && (
+              <FindingDecisionButtons finding={finding} onChange={review.setDecision} />
+            )}
             <button
               type="button"
               onClick={handleCopyThread}

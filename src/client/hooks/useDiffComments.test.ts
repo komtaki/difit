@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import type { DiffContextStorage } from '../../types/diff';
+import type { DiffCommentThread, DiffContextStorage } from '../../types/diff';
 import { useDiffComments } from './useDiffComments';
 
 // Mock StorageService
@@ -499,6 +499,80 @@ const next = true;
       expect(result.current.threads[0]?.id).toBe(threadId);
       expect(result.current.threads[0]?.messages).toHaveLength(2);
       expect(result.current.threads[0]?.messages[1]?.body).toBe('Reply comment');
+    });
+  });
+
+  describe('setFindingDecision', () => {
+    const findingThread: DiffCommentThread = {
+      id: 'finding-1',
+      filePath: 'src/a.ts',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      position: { side: 'new', line: 3 },
+      messages: [
+        {
+          id: 'finding-1',
+          body: 'Possible null dereference',
+          author: 'correctness',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+      kind: 'finding',
+      finding: {
+        reviewer: 'correctness',
+        severity: 'warn',
+        title: 'Null check',
+        fingerprint: 'fp-1',
+        previousDecision: 'adopted',
+      },
+    };
+
+    it('updates the decision while keeping the rest of the finding metadata', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+
+      act(() => {
+        result.current.replaceThreads([findingThread]);
+      });
+      act(() => {
+        result.current.setFindingDecision('finding-1', 'adopted');
+      });
+
+      expect(result.current.threads[0]?.finding).toEqual({
+        ...findingThread.finding,
+        decision: 'adopted',
+      });
+      expect(mockDiffContextData?.threads[0]?.finding?.decision).toBe('adopted');
+    });
+
+    it('clears the decision when undefined is given', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+
+      act(() => {
+        result.current.replaceThreads([
+          { ...findingThread, finding: { ...findingThread.finding!, decision: 'rejected' } },
+        ]);
+      });
+      act(() => {
+        result.current.setFindingDecision('finding-1', undefined);
+      });
+
+      expect(result.current.threads[0]?.finding?.decision).toBeUndefined();
+      expect(result.current.threads[0]?.finding?.fingerprint).toBe('fp-1');
+    });
+
+    it('ignores threads that are not findings', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+
+      act(() => {
+        result.current.addThread({ filePath: 'src/a.ts', body: 'Human', side: 'new', line: 1 });
+      });
+      const [thread] = result.current.threads;
+      act(() => {
+        result.current.setFindingDecision(thread!.id, 'adopted');
+      });
+
+      expect(result.current.threads[0]).toEqual(thread);
     });
   });
 });

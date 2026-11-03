@@ -186,6 +186,30 @@ describe('useFileWatch', () => {
       });
     });
 
+    it('forwards overview and reviewer changes to the review context handler', async () => {
+      const onReviewContextChanged = vi.fn();
+      const { result } = renderHook(() =>
+        useFileWatch(undefined, undefined, onReviewContextChanged),
+      );
+
+      await waitFor(() => {
+        expect(result.current.isConnected).toBe(true);
+      });
+
+      const eventSource = MockEventSource.instances[0]!;
+      act(() => {
+        eventSource.dispatchMessage(
+          JSON.stringify({ type: 'overviewChanged', timestamp: new Date().toISOString() }),
+        );
+        eventSource.dispatchMessage(
+          JSON.stringify({ type: 'reviewersChanged', timestamp: new Date().toISOString() }),
+        );
+      });
+
+      expect(onReviewContextChanged).toHaveBeenNthCalledWith(1, 'overviewChanged');
+      expect(onReviewContextChanged).toHaveBeenNthCalledWith(2, 'reviewersChanged');
+    });
+
     it('should handle malformed messages gracefully', async () => {
       const { result } = renderHook(() => useFileWatch());
 

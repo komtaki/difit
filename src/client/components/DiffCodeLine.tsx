@@ -59,8 +59,12 @@ export function DiffCodeLine({
   };
 
   return (
-    <div className="flex items-center relative min-h-[16px]">
+    <div
+      className="flex items-center relative min-h-[16px]"
+      data-symbol-line={line.type === 'delete' ? undefined : line.newLineNumber}
+    >
       <span
+        data-diff-prefix="true"
         className={`w-5 text-center flex-shrink-0 ${showPrefixBorder ? 'border-r border-github-border' : ''} ${getPrefixClass(
           line.type,
         )}`}

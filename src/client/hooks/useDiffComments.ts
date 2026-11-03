@@ -7,6 +7,7 @@ import {
   type DiffContextStorage,
   type DiffCommentThread,
   type DiffSide,
+  type FindingDecision,
   type LegacyDiffComment,
 } from '../../types/diff';
 import {
@@ -45,6 +46,7 @@ interface UseDiffCommentsReturn {
   updateComment: (commentId: string, newBody: string) => void;
   removeMessage: (threadId: string, messageId: string) => void;
   updateMessage: (threadId: string, messageId: string, newBody: string) => void;
+  setFindingDecision: (threadId: string, decision: FindingDecision | undefined) => void;
   clearAllComments: (options?: { resetAppliedCommentImportIds?: boolean }) => void;
   applyCommentImports: (imports: CommentImport[], importId: string) => string[];
   generatePrompt: (commentId: string) => string;
@@ -321,6 +323,20 @@ export function useDiffComments(
     [saveThreads, threads],
   );
 
+  const setFindingDecision = useCallback(
+    (threadId: string, decision: FindingDecision | undefined) => {
+      const now = new Date().toISOString();
+      const newThreads = threads.map((thread) => {
+        if (thread.id !== threadId || !thread.finding) return thread;
+        const finding = { ...thread.finding, decision };
+        if (!decision) delete finding.decision;
+        return { ...thread, updatedAt: now, finding };
+      });
+      saveThreads(newThreads);
+    },
+    [saveThreads, threads],
+  );
+
   const updateComment = useCallback(
     (commentId: string, newBody: string) => {
       updateMessage(commentId, commentId, newBody);
@@ -462,6 +478,7 @@ export function useDiffComments(
     updateComment,
     removeMessage,
     updateMessage,
+    setFindingDecision,
     clearAllComments: clearAllCommentsWithOptions,
     applyCommentImports,
     generatePrompt,

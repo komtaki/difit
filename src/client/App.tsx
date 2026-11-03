@@ -11,8 +11,9 @@ import {
   type CommentThread,
   type RevisionsResponse,
 } from '../types/diff';
+import type { LspLocation } from '../types/lsp';
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode';
-import { mergeCommentThreads } from '../utils/commentImports';
+import { getThreadKind, mergeCommentThreads } from '../utils/commentImports';
 import {
   createDiffSelection,
   diffSelectionsEqual,
@@ -26,13 +27,19 @@ import { CommentsListModal } from './components/CommentsListModal';
 import { DiffQuickMenu } from './components/DiffQuickMenu';
 import { DiffViewer } from './components/DiffViewer';
 import { FileList } from './components/FileList';
+import { FindingsPanel } from './components/FindingsPanel';
 import { GitHubIcon } from './components/GitHubIcon';
 import { HelpModal } from './components/HelpModal';
 import { Logo } from './components/Logo';
+import { OverviewPanel } from './components/OverviewPanel';
+import { ReadOnlyFileModal } from './components/ReadOnlyFileModal';
 import { ReloadButton } from './components/ReloadButton';
 import { RevisionDetailModal } from './components/RevisionDetailModal';
+import { ReviewTabs, type ReviewTab } from './components/ReviewTabs';
 import { SettingsModal } from './components/SettingsModal';
 import { SparkleAnimation } from './components/SparkleAnimation';
+import { SymbolPanel } from './components/SymbolPanel';
+import { ReviewThreadProvider } from './contexts/ReviewThreadContext';
 import { WordHighlightProvider } from './contexts/WordHighlightContext';
 import { useAppearanceSettings } from './hooks/useAppearanceSettings';
 import { useDiffComments } from './hooks/useDiffComments';
@@ -40,13 +47,15 @@ import { useExpandedLines, type MergedChunk } from './hooks/useExpandedLines';
 import { useFileWatch } from './hooks/useFileWatch';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { useLazyDiffRendering } from './hooks/useLazyDiffRendering';
+import { useReviewContext } from './hooks/useReviewContext';
+import { useSymbolNavigation } from './hooks/useSymbolNavigation';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 import { fetchClientSettings, saveClientSettings } from './services/userSettings';
 import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
 import { getFileElementId } from './utils/domUtils';
-import { findCommentPosition } from './utils/navigation/positionHelpers';
+import { findCommentPosition, findLinePosition } from './utils/navigation/positionHelpers';
 import { resolveEventSourceUrl } from './utils/eventSourceUrl';
 import {
   EMPTY_MERGED_CHUNKS_STATE,
@@ -54,6 +63,14 @@ import {
   getMergedChunksForVersion,
 } from './utils/mergedChunks';
 import { buildFileLineIndex, isThreadOutdated } from './utils/outdatedComments';
+import {
+  countFindingsByReviewer,
+  countOpenFindingsByFile,
+  isFindingThread,
+  isHiddenInDiff,
+  preserveServerFindingHistory,
+} from './utils/reviewThreads';
+import { findSymbolTarget } from './utils/symbolTarget';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
@@ -192,6 +209,7 @@ function App() {
     removeThread,
     removeMessage,
     updateMessage,
+    setFindingDecision,
     clearAllComments,
     generateThreadPrompt,
     generateAllCommentsPrompt,
@@ -511,9 +529,21 @@ function App() {
     return map;
   }, [navigableFiles]);
 
+  const diffVisibleThreads = useMemo(
+    () => threads.filter((thread) => !isHiddenInDiff(thread)),
+    [threads],
+  );
+  const findingThreads = useMemo(() => threads.filter(isFindingThread), [threads]);
+  const openFindingCounts = useMemo(() => countOpenFindingsByFile(threads), [threads]);
+  const openFindingCount = useMemo(
+    () => Array.from(openFindingCounts.values()).reduce((sum, count) => sum + count, 0),
+    [openFindingCounts],
+  );
+  const findingCountByReviewer = useMemo(() => countFindingsByReviewer(threads), [threads]);
+
   const normalizedThreads = useMemo<CommentThread[]>(
     () =>
-      threads.map((thread) => ({
+      diffVisibleThreads.map((thread) => ({
         id: thread.id,
         file: thread.filePath,
         line:
@@ -527,8 +557,16 @@ function App() {
         isOutdated: isThreadOutdated(thread, fileLineIndexByPath.get(thread.filePath)),
         messages: thread.messages,
       })),
-    [threads, fileLineIndexByPath],
+    [diffVisibleThreads, fileLineIndexByPath],
   );
+  const humanCommentThreads = useMemo(() => {
+    const humanThreadIds = new Set(
+      diffVisibleThreads
+        .filter((thread) => getThreadKind(thread) === 'comment')
+        .map((thread) => thread.id),
+    );
+    return normalizedThreads.filter((thread) => humanThreadIds.has(thread.id));
+  }, [diffVisibleThreads, normalizedThreads]);
   const showAuthorBadges = useMemo(
     () => hasMultipleCommentAuthors(normalizedThreads.flatMap((thread) => thread.messages)),
     [normalizedThreads],
@@ -569,10 +607,30 @@ function App() {
     }
   }, [commentsContextKey, fetchServerThreads, replaceThreads]);
 
+  const { overview, reviewers, handleReviewContextChanged } = useReviewContext();
+  const hasReviewTabs = overview !== null || findingThreads.length > 0;
+  const [selectedTab, setSelectedTab] = useState<ReviewTab | null>(null);
+  const activeTab: ReviewTab = hasReviewTabs
+    ? (selectedTab ?? (overview !== null ? 'overview' : 'files'))
+    : 'files';
+  const doneReviewerCount = reviewers.filter((reviewer) => reviewer.status === 'done').length;
+  const isAnyReviewerRunning = doneReviewerCount < reviewers.length;
+
+  useEffect(() => {
+    if (!isAnyReviewerRunning) return;
+
+    const confirmLeaveWhileReviewing = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', confirmLeaveWhileReviewing);
+    return () => window.removeEventListener('beforeunload', confirmLeaveWhileReviewing);
+  }, [isAnyReviewerRunning]);
+
   // File watch for reload functionality - initialize with callback
   const { shouldReload, reload, watchState } = useFileWatch(
     handleWatchReload,
     handleCommentsChanged,
+    handleReviewContextChanged,
   );
 
   // Track which file the mouse is over so `v` works without a cursor
@@ -925,7 +983,10 @@ function App() {
         const serverThreads = await fetchServerThreads();
         const nextThreads = shouldReplaceFromServer
           ? serverThreads
-          : mergeCommentThreads(serverThreads, threads).threads;
+          : preserveServerFindingHistory(
+              serverThreads,
+              mergeCommentThreads(serverThreads, threads).threads,
+            );
         if (cancelled) {
           return;
         }
@@ -1105,6 +1166,93 @@ function App() {
     }
   };
 
+  const showLineInDiff = useCallback(
+    (filePath: string, line: number, side: DiffSide = 'new') => {
+      if (!diffData) return;
+
+      const fileIndex = diffData.files.findIndex((file) => file.path === filePath);
+      const file = diffData.files[fileIndex];
+      if (!file) return;
+
+      const position =
+        findLinePosition(file, fileIndex, line, side) ??
+        findLinePosition(file, fileIndex, line, side === 'new' ? 'old' : 'new');
+      setSelectedTab('files');
+      requestAnimationFrame(() => {
+        if (position) {
+          setCursorPosition(position);
+        } else {
+          scrollFileIntoDiffContainer(filePath);
+        }
+      });
+    },
+    [diffData, scrollFileIntoDiffContainer, setCursorPosition],
+  );
+
+  const handleNavigateToFinding = useCallback(
+    (threadId: string) => {
+      const thread = threads.find((item) => item.id === threadId);
+      if (!thread) return;
+      const { line, side } = thread.position;
+      showLineInDiff(thread.filePath, typeof line === 'number' ? line : line.end, side);
+    },
+    [showLineInDiff, threads],
+  );
+
+  const isFileInDiff = useCallback((filePath: string) => filesByPath.has(filePath), [filesByPath]);
+
+  const symbolNavigation = useSymbolNavigation();
+  const { lookup: lookupSymbol, back: backSymbol } = symbolNavigation;
+  const lspStatus = symbolNavigation.status?.enabled ? symbolNavigation.status : null;
+  const isSymbolPanelOpen =
+    symbolNavigation.current !== null ||
+    symbolNavigation.isLoading ||
+    symbolNavigation.error !== null;
+  const symbolOrigin = symbolNavigation.current?.origin;
+  const [readOnlyLocation, setReadOnlyLocation] = useState<LspLocation | null>(null);
+
+  const handleSymbolClickCapture = useCallback(
+    (e: React.MouseEvent) => {
+      if (!lspStatus || !(e.metaKey || e.ctrlKey)) return;
+      const target = findSymbolTarget(e);
+      if (!target) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void lookupSymbol(target);
+    },
+    [lspStatus, lookupSymbol],
+  );
+
+  const handleSelectSymbolLocation = useCallback(
+    (location: LspLocation) => {
+      if (location.inDiff) {
+        showLineInDiff(location.filePath, location.line);
+      } else {
+        setReadOnlyLocation(location);
+      }
+    },
+    [showLineInDiff],
+  );
+
+  const handleSymbolBack = useCallback(() => {
+    if (symbolOrigin) {
+      showLineInDiff(symbolOrigin.filePath, symbolOrigin.line);
+    }
+    backSymbol();
+  }, [backSymbol, showLineInDiff, symbolOrigin]);
+
+  const handleScrollToFile = useCallback(
+    (filePath: string) => {
+      if (activeTab === 'files') {
+        scrollFileIntoDiffContainer(filePath);
+        return;
+      }
+      setSelectedTab('files');
+      requestAnimationFrame(() => scrollFileIntoDiffContainer(filePath));
+    },
+    [activeTab, scrollFileIntoDiffContainer],
+  );
+
   const handleOpenInEditor = useCallback(
     async (filePath: string, lineNumber: number) => {
       try {
@@ -1197,7 +1345,7 @@ function App() {
     settings.editor.command.trim() !== '' &&
     settings.editor.argsTemplate.trim() !== '';
 
-  return (
+  const appContent = (
     <WordHighlightProvider>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
@@ -1306,6 +1454,11 @@ function App() {
                 isMobile ? 'gap-3' : 'gap-4'
               }`}
             >
+              {isAnyReviewerRunning && (
+                <span className="text-xs text-github-warning">
+                  Reviewing {doneReviewerCount}/{reviewers.length}
+                </span>
+              )}
               {!isMobile && threads.length > 0 && (
                 <CommentsDropdown
                   commentsCount={threads.length}
@@ -1388,6 +1541,14 @@ function App() {
           />
         )}
 
+        {hasReviewTabs && (
+          <ReviewTabs
+            activeTab={activeTab}
+            findingCount={openFindingCount}
+            onChange={setSelectedTab}
+          />
+        )}
+
         {isMobile && isFileTreeOpen && (
           <button
             type="button"
@@ -1426,9 +1587,10 @@ function App() {
               <div className="flex-1 overflow-y-auto">
                 <FileList
                   files={diffData.files}
-                  onScrollToFile={scrollFileIntoDiffContainer}
+                  onScrollToFile={handleScrollToFile}
                   onFileSelected={isMobile ? handleMobileFileSelected : undefined}
-                  comments={normalizedThreads}
+                  comments={humanCommentThreads}
+                  findingCounts={openFindingCounts}
                   reviewedFiles={viewedFiles}
                   onToggleReviewed={toggleFileReviewed}
                   onToggleFolderReviewed={toggleFolderReviewed}
@@ -1471,9 +1633,33 @@ function App() {
             />
           )}
 
+          {activeTab === 'overview' && (
+            <div className="flex-1 overflow-y-auto">
+              <OverviewPanel
+                markdown={overview}
+                reviewers={reviewers}
+                findingCountByReviewer={findingCountByReviewer}
+                isFileInDiff={isFileInDiff}
+                onOpenFileReference={showLineInDiff}
+                syntaxTheme={settings.syntaxTheme}
+              />
+            </div>
+          )}
+          {activeTab === 'findings' && (
+            <div className="flex-1 overflow-y-auto">
+              <FindingsPanel
+                threads={findingThreads}
+                onNavigate={handleNavigateToFinding}
+                onSetFindingDecision={setFindingDecision}
+              />
+            </div>
+          )}
           <main
             ref={diffScrollContainerRef}
-            className={`flex-1 overflow-y-auto ${showMobileCommentsBar ? 'pb-16' : ''}`}
+            className={`flex-1 overflow-y-auto ${showMobileCommentsBar ? 'pb-16' : ''} ${
+              activeTab === 'files' ? '' : 'hidden'
+            }`}
+            onClickCapture={handleSymbolClickCapture}
           >
             {diffData.files.map((file, fileIndex) => {
               const fileThreads = threadsByFile.get(file.path) ?? EMPTY_COMMENT_THREADS;
@@ -1560,6 +1746,18 @@ function App() {
               );
             })}
           </main>
+          {activeTab === 'files' && lspStatus && isSymbolPanelOpen && (
+            <SymbolPanel
+              status={lspStatus}
+              current={symbolNavigation.current}
+              isLoading={symbolNavigation.isLoading}
+              error={symbolNavigation.error}
+              canGoBack={symbolNavigation.canGoBack}
+              onSelectLocation={handleSelectSymbolLocation}
+              onBack={handleSymbolBack}
+              onClose={symbolNavigation.close}
+            />
+          )}
         </div>
 
         {showMobileCommentsBar && (
@@ -1587,6 +1785,14 @@ function App() {
 
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
+        {readOnlyLocation && (
+          <ReadOnlyFileModal
+            filePath={readOnlyLocation.filePath}
+            line={readOnlyLocation.line}
+            onClose={() => setReadOnlyLocation(null)}
+          />
+        )}
+
         <CommentsListModal
           isOpen={isCommentsListOpen}
           onClose={() => setIsCommentsListOpen(false)}
@@ -1602,6 +1808,12 @@ function App() {
         />
       </div>
     </WordHighlightProvider>
+  );
+
+  return (
+    <ReviewThreadProvider threads={threads} onSetFindingDecision={setFindingDecision}>
+      {appContent}
+    </ReviewThreadProvider>
   );
 }
 

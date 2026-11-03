@@ -9,6 +9,7 @@ import {
   FilePen,
   Search,
   MessageSquare,
+  Sparkles,
   ChevronsDownUp,
   ChevronsUpDown,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ interface FileListProps {
   onScrollToFile: (path: string) => void;
   onFileSelected?: () => void;
   comments: CommentThread[];
+  findingCounts?: Map<string, number>;
   reviewedFiles: Set<string>;
   onToggleReviewed: (path: string) => void;
   onToggleFolderReviewed: (path: string, reviewed: boolean) => void;
@@ -158,6 +160,7 @@ export const FileList = memo(function FileList({
   onScrollToFile,
   onFileSelected,
   comments,
+  findingCounts,
   reviewedFiles,
   onToggleReviewed,
   onToggleFolderReviewed,
@@ -398,6 +401,7 @@ export const FileList = memo(function FileList({
     } else if (node.file) {
       const file = node.file;
       const commentCount = commentCountMap.get(file.path) ?? 0;
+      const findingCount = findingCounts?.get(file.path) ?? 0;
       const isReviewed = reviewedFiles.has(file.path);
       const fileIndex = fileIndexMap.get(file.path) ?? -1;
       const isSelected = selectedFileIndex !== null && selectedFileIndex === fileIndex;
@@ -438,6 +442,17 @@ export const FileList = memo(function FileList({
             <span className="text-github-warning text-sm font-medium ml-auto flex items-center gap-1">
               <MessageSquare size={14} />
               {commentCount}
+            </span>
+          )}
+          {findingCount > 0 && (
+            <span
+              className={`text-[var(--color-finding-text)] text-sm font-medium flex items-center gap-1 ${
+                commentCount > 0 ? '' : 'ml-auto'
+              }`}
+              aria-label={`${findingCount} AI ${findingCount === 1 ? 'finding' : 'findings'}`}
+            >
+              <Sparkles size={14} />
+              {findingCount}
             </span>
           )}
         </div>
