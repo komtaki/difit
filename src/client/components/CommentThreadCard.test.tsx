@@ -478,20 +478,24 @@ describe('CommentThreadCard', () => {
       expect(screen.getByText('correctness')).toBeInTheDocument();
     });
 
-    it('lets the finding header wrap instead of overlapping in narrow cards', () => {
+    it('gives the finding title its own full-width row below the header', () => {
       renderReviewCard(toDiffThread('finding', baseFinding));
 
       const title = screen.getByText('Missing null check');
-      const headerInfo = title.parentElement;
+      const severity = screen.getByText('warn');
+      const headerInfo = severity.parentElement;
       const header = headerInfo?.parentElement;
       const actions = screen.getByRole('button', { name: 'Adopt' }).parentElement;
 
-      expect(title).not.toHaveClass('truncate');
-      expect(title).toHaveClass('min-w-0', 'break-words');
-      expect(headerInfo).toHaveClass('flex-wrap');
       expect(header).toHaveClass('flex-wrap');
+      expect(headerInfo).toHaveClass('flex-wrap');
+      expect(headerInfo).toContainElement(screen.getByText('correctness'));
       expect(actions).toHaveClass('flex-wrap');
       expect(actions).toContainElement(screen.getByTitle('Copy thread prompt for AI coding agent'));
+      expect(header).not.toContainElement(title);
+      expect(title).toHaveClass('w-full', 'break-words');
+      expect(title.parentElement).toBe(header?.parentElement);
+      expect(header?.nextElementSibling).toBe(title);
     });
 
     it('lets the explanation header wrap instead of squeezing the file label', () => {

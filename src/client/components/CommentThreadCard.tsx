@@ -211,6 +211,34 @@ const PATH_LABEL_STYLE: Record<ThreadKind, React.CSSProperties> = {
   },
 };
 
+interface HeaderLayoutProps {
+  isReviewThread: boolean;
+  title?: string;
+  isCollapsed: boolean;
+  children: React.ReactNode;
+}
+
+function HeaderLayout({ isReviewThread, title, isCollapsed, children }: HeaderLayoutProps) {
+  if (!isReviewThread) {
+    return (
+      <div className={`flex items-center justify-between gap-3 ${isCollapsed ? '' : 'mb-3'}`}>
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div className={isCollapsed ? '' : 'mb-3'}>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">{children}</div>
+      {title && (
+        <div className="mt-2 w-full break-words text-sm font-semibold text-github-text-primary">
+          {title}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface CommentThreadCardProps {
   thread: CommentThread;
   showAuthorBadges?: boolean;
@@ -276,10 +304,10 @@ export function CommentThreadCard({
       }`}
       onClick={onClick}
     >
-      <div
-        className={`flex items-center justify-between ${
-          isReviewThread ? 'flex-wrap gap-x-3 gap-y-2' : 'gap-3'
-        } ${isCollapsed ? '' : 'mb-3'}`}
+      <HeaderLayout
+        isReviewThread={isReviewThread}
+        title={finding?.title}
+        isCollapsed={isCollapsed}
       >
         <div
           className={`flex min-w-0 flex-1 items-center gap-2 text-xs text-github-text-secondary ${
@@ -308,9 +336,6 @@ export function CommentThreadCard({
           {finding && (
             <>
               <SeverityBadge severity={finding.severity} />
-              <span className="min-w-0 break-words font-semibold text-github-text-primary">
-                {finding.title}
-              </span>
               <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--color-finding-bg)] px-2 text-[10px] font-medium text-[var(--color-finding-text)]">
                 {finding.reviewer}
               </span>
@@ -381,7 +406,7 @@ export function CommentThreadCard({
             </button>
           </div>
         )}
-      </div>
+      </HeaderLayout>
 
       {!isCollapsed && (
         <div className="space-y-3">
