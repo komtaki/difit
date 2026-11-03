@@ -147,25 +147,27 @@ function selectLines(content: string, line: DiffLineRange): string {
   return lines.slice(start - 1, end).join('\n');
 }
 
-function parseJsonBody(body: unknown): unknown {
-  return typeof body === 'string' ? (JSON.parse(body) as unknown) : body;
+function parseJsonObject(body: unknown): Record<string, unknown> | null {
+  let payload: unknown;
+  try {
+    payload = typeof body === 'string' ? (JSON.parse(body) as unknown) : body;
+  } catch {
+    return null;
+  }
+  return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
 }
 
 function parseOverviewPayload(body: unknown): string | null {
-  const payload = parseJsonBody(body);
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-  const { markdown } = payload as { markdown?: unknown };
+  const markdown = parseJsonObject(body)?.markdown;
   return typeof markdown === 'string' ? markdown : null;
 }
 
 function parseReviewerPayload(body: unknown): { name: string; status: ReviewerStatus } | null {
-  const payload = parseJsonBody(body);
-  if (!payload || typeof payload !== 'object') {
+  const payload = parseJsonObject(body);
+  if (!payload) {
     return null;
   }
-  const { name, status } = payload as { name?: unknown; status?: unknown };
+  const { name, status } = payload;
   if (typeof name !== 'string' || name.trim().length === 0) {
     return null;
   }
@@ -310,30 +312,35 @@ export async function startServer(
     ? null
     : await createDecisionStore({ repoPath: repositoryPath });
 
-  async function readFindingLineContent(
-    commentImport: ThreadCommentImport,
-    targetRef: string,
-  ): Promise<string> {
-    if (commentImport.codeSnapshot) {
-      return commentImport.codeSnapshot.content;
-    }
-    try {
-      const content = await parser.getBlobContent(commentImport.filePath, targetRef);
-      return selectLines(content.toString('utf8'), commentImport.position.line);
-    } catch {
-      return '';
-    }
-  }
-
   async function resolveFindingHistories(commentImports: CommentImport[], targetRef: string) {
+    if (!decisionStore) {
+      return () => undefined;
+    }
     const findingHistories = new Map<
       CommentImport,
       Pick<FindingMeta, 'fingerprint' | 'decision' | 'previousDecision'>
     >();
 
+    const fileContents = new Map<string, Promise<string | null>>();
+    const readFindingLineContent = async (commentImport: ThreadCommentImport) => {
+      if (commentImport.codeSnapshot) {
+        return commentImport.codeSnapshot.content;
+      }
+      let content = fileContents.get(commentImport.filePath);
+      if (!content) {
+        content = parser.getBlobContent(commentImport.filePath, targetRef).then(
+          (blob) => blob.toString('utf8'),
+          () => null,
+        );
+        fileContents.set(commentImport.filePath, content);
+      }
+      const text = await content;
+      return text === null ? '' : selectLines(text, commentImport.position.line);
+    };
+
     for (const commentImport of commentImports) {
       const { reviewer, title } = commentImport;
-      if (!decisionStore || commentImport.type !== 'thread' || commentImport.kind !== 'finding') {
+      if (commentImport.type !== 'thread' || commentImport.kind !== 'finding') {
         continue;
       }
       if (!reviewer || !title) {
@@ -345,7 +352,7 @@ export async function startServer(
         reviewer,
         filePath: commentImport.filePath,
         title,
-        lineContent: commentImport.id ? '' : await readFindingLineContent(commentImport, targetRef),
+        lineContent: commentImport.id ? '' : await readFindingLineContent(commentImport),
       });
       const previousDecision = decisionStore.get(fingerprint)?.decision;
       findingHistories.set(commentImport, {
@@ -970,13 +977,7 @@ export async function startServer(
   });
 
   app.put('/api/overview', (req, res) => {
-    let markdown: string | null;
-    try {
-      markdown = parseOverviewPayload(req.body);
-    } catch {
-      markdown = null;
-    }
-
+    const markdown = parseOverviewPayload(req.body);
     if (markdown === null) {
       res.status(400).json({ error: 'Invalid overview payload' });
       return;
@@ -993,13 +994,7 @@ export async function startServer(
   });
 
   app.post('/api/reviewers', (req, res) => {
-    let reviewer: { name: string; status: ReviewerStatus } | null;
-    try {
-      reviewer = parseReviewerPayload(req.body);
-    } catch {
-      reviewer = null;
-    }
-
+    const reviewer = parseReviewerPayload(req.body);
     if (!reviewer) {
       res.status(400).json({ error: 'Invalid reviewer payload' });
       return;
@@ -1027,11 +1022,11 @@ export async function startServer(
   }
 
   function parseLspPositionRequest(body: unknown): LspPositionRequest | null {
-    const payload = parseJsonBody(body);
-    if (!payload || typeof payload !== 'object') {
+    const payload = parseJsonObject(body);
+    if (!payload) {
       return null;
     }
-    const { filePath, line, character } = payload as Record<string, unknown>;
+    const { filePath, line, character } = payload;
     const filePathResult = parseRepositoryRelativePath(filePath);
     if (!filePathResult.ok) {
       return null;
@@ -1079,12 +1074,7 @@ export async function startServer(
         return;
       }
 
-      let request: LspPositionRequest | null;
-      try {
-        request = parseLspPositionRequest(req.body);
-      } catch {
-        request = null;
-      }
+      const request = parseLspPositionRequest(req.body);
       if (!request) {
         res.status(400).json({ error: 'Invalid symbol lookup payload' });
         return;
