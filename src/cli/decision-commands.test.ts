@@ -80,6 +80,18 @@ describe('decisions command', () => {
     expect(reloaded!.all()).toEqual({});
   });
 
+  it('fails on an invalid branch name without touching files outside the decisions directory', async () => {
+    const outsidePath = join(repoPath, '.git', 'outside.json');
+    await fs.writeFile(outsidePath, '{}');
+
+    await run('clear', '--branch', '../../outside');
+
+    expect(consoleErrors[0]).toBe('Error: Invalid branch name: ../../outside');
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(consoleOutput).toEqual([]);
+    await expect(fs.access(outsidePath)).resolves.toBeUndefined();
+  });
+
   it('fails when the branch cannot be determined', async () => {
     const directory = await fs.mkdtemp(join(tmpdir(), 'difit-no-repo-'));
     try {

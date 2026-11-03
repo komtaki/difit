@@ -11,6 +11,7 @@ import {
   computeFindingFingerprint,
   createDecisionStore,
   type DecisionRecord,
+  InvalidBranchNameError,
   syncFindingDecisions,
 } from './decision-store.js';
 
@@ -151,6 +152,17 @@ describe('createDecisionStore', () => {
 
     expect(store!.filePath.endsWith(join('decisions', 'other.json'))).toBe(true);
   });
+
+  it.each(['../../config', 'a/../b', '/tmp/x', '.hidden'])(
+    'rejects the invalid branch name %s',
+    async (branch) => {
+      const repoPath = await setupRepository();
+
+      await expect(createDecisionStore({ repoPath, branch })).rejects.toThrow(
+        new InvalidBranchNameError(branch),
+      );
+    },
+  );
 
   it('returns null on a detached HEAD', async () => {
     const repoPath = await setupRepository();

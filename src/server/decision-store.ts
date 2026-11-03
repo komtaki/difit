@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 
 import { simpleGit } from 'simple-git';
 
@@ -88,22 +88,41 @@ async function readDecisionFile(filePath: string): Promise<Map<string, DecisionR
   }
 }
 
+export class InvalidBranchNameError extends Error {
+  constructor(branch: string) {
+    super(`Invalid branch name: ${branch}`);
+    this.name = 'InvalidBranchNameError';
+  }
+}
+
 async function resolveDecisionFilePath(
   repoPath: string,
   branch: string | undefined,
 ): Promise<string | null> {
   const git = simpleGit(repoPath);
+  let decisionsDir: string;
+  let branchName: string;
   try {
     const commonDir = (await git.revparse(['--git-common-dir'])).trim();
-    const branchName =
-      branch ?? (await git.raw(['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim();
-    if (branchName.length === 0) {
-      return null;
-    }
-    return join(resolve(repoPath, commonDir), 'difit', 'decisions', `${branchName}.json`);
+    decisionsDir = join(resolve(repoPath, commonDir), 'difit', 'decisions');
+    branchName = branch ?? (await git.raw(['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim();
   } catch {
     return null;
   }
+  if (branchName.length === 0) {
+    return null;
+  }
+
+  try {
+    await git.raw(['check-ref-format', '--branch', branchName]);
+  } catch {
+    throw new InvalidBranchNameError(branchName);
+  }
+  const filePath = resolve(decisionsDir, `${branchName}.json`);
+  if (!filePath.startsWith(`${decisionsDir}${sep}`)) {
+    throw new InvalidBranchNameError(branchName);
+  }
+  return filePath;
 }
 
 export async function createDecisionStore(options: {

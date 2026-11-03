@@ -1,12 +1,26 @@
 import { Command } from 'commander';
 
-import { createDecisionStore, type DecisionStore } from '../server/decision-store.js';
+import {
+  createDecisionStore,
+  type DecisionStore,
+  InvalidBranchNameError,
+} from '../server/decision-store.js';
 
 async function openDecisionStore(
   repoPath: string,
   branch: string | undefined,
 ): Promise<DecisionStore | null> {
-  const store = await createDecisionStore({ repoPath, ...(branch ? { branch } : {}) });
+  let store: DecisionStore | null;
+  try {
+    store = await createDecisionStore({ repoPath, ...(branch ? { branch } : {}) });
+  } catch (error) {
+    if (!(error instanceof InvalidBranchNameError)) {
+      throw error;
+    }
+    console.error(`Error: ${error.message}`);
+    process.exit(1);
+    return null;
+  }
   if (!store) {
     console.error(
       'Error: Cannot determine the branch to store decisions for. Run inside a git repository on a branch or pass --branch.',
