@@ -24,9 +24,22 @@ import {
   resolveEditorOption,
 } from '../utils/editorOptions.js';
 import { getFileExtension } from '../utils/fileUtils.js';
+import { selectThreadsForOutput } from '../utils/reviewOutput.js';
 
+import {
+  computeFindingFingerprint,
+  createDecisionStore,
+  syncFindingDecisions,
+} from './decision-store.js';
 import { FileWatcherService } from './file-watcher.js';
 import { GitDiffParser } from './git-diff.js';
+import { LspRequestTimeoutError } from './lsp/lsp-client.js';
+import {
+  createLspManager,
+  LspUnavailableError,
+  LspUnsupportedFileError,
+} from './lsp/lsp-manager.js';
+import { createReviewContext } from './review-context.js';
 import { parseUserSettingsPatch, readUserConfig, updateUserClientSettings } from './user-config.js';
 
 import {
@@ -35,11 +48,16 @@ import {
   type Comment,
   type CommentThread,
   type DiffCommentThread,
+  type DiffLineRange,
   type DiffResponse,
   type DiffSelection,
+  type FindingMeta,
   type GeneratedStatusResponse,
   type RevisionsResponse,
+  type ThreadCommentImport,
 } from '@/types/diff.js';
+import { type LspPositionRequest, type LspStatusResponse } from '@/types/lsp.js';
+import { type ReviewerStatus } from '@/types/review.js';
 import {
   createDiffSelection,
   diffSelectionsEqual,
@@ -59,9 +77,11 @@ interface ServerOptions {
   diffMode?: DiffMode;
   repoPath?: string;
   contextLines?: number;
+  overview?: string;
 }
 
 const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
+const LSP_TARGET_COMMITISHES = new Set(['HEAD', 'working', '.']);
 const MAX_DIFF_CACHE_ENTRIES = 8;
 
 function createDiffCacheKey(selection: DiffSelection, ignoreWhitespace: boolean) {
@@ -119,6 +139,42 @@ function createResolvedCommentSelection(
 
 function createCommentSessionKey(selection: DiffSelection): string {
   return getDiffSelectionKey(selection);
+}
+
+function selectLines(content: string, line: DiffLineRange): string {
+  const lines = content.split('\n');
+  const { start, end } = typeof line === 'number' ? { start: line, end: line } : line;
+  return lines.slice(start - 1, end).join('\n');
+}
+
+function parseJsonObject(body: unknown): Record<string, unknown> | null {
+  let payload: unknown;
+  try {
+    payload = typeof body === 'string' ? (JSON.parse(body) as unknown) : body;
+  } catch {
+    return null;
+  }
+  return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+}
+
+function parseOverviewPayload(body: unknown): string | null {
+  const markdown = parseJsonObject(body)?.markdown;
+  return typeof markdown === 'string' ? markdown : null;
+}
+
+function parseReviewerPayload(body: unknown): { name: string; status: ReviewerStatus } | null {
+  const payload = parseJsonObject(body);
+  if (!payload) {
+    return null;
+  }
+  const { name, status } = payload;
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    return null;
+  }
+  if (status !== 'running' && status !== 'done') {
+    return null;
+  }
+  return { name: name.trim(), status };
 }
 
 export async function startServer(
@@ -194,6 +250,7 @@ export async function startServer(
 
   // Track current revisions for cache invalidation
   let currentSelection = initialSelection;
+  let currentDiffFilePaths = new Set(initialDiffData.files.map((file) => file.path));
   let currentCommentSelection = createResolvedCommentSelection(
     initialDiffData,
     initialSelection,
@@ -246,8 +303,74 @@ export async function startServer(
     };
   }
 
+  const reviewContext = createReviewContext();
+  if (options.overview !== undefined) {
+    reviewContext.setOverview(options.overview);
+  }
+
+  const decisionStore = options.stdinDiff
+    ? null
+    : await createDecisionStore({ repoPath: repositoryPath });
+
+  async function resolveFindingHistories(commentImports: CommentImport[], targetRef: string) {
+    if (!decisionStore) {
+      return () => undefined;
+    }
+    const findingHistories = new Map<
+      CommentImport,
+      Pick<FindingMeta, 'fingerprint' | 'decision' | 'previousDecision'>
+    >();
+
+    const fileContents = new Map<string, Promise<string | null>>();
+    const readFindingLineContent = async (commentImport: ThreadCommentImport) => {
+      if (commentImport.codeSnapshot) {
+        return commentImport.codeSnapshot.content;
+      }
+      let content = fileContents.get(commentImport.filePath);
+      if (!content) {
+        content = parser.getBlobContent(commentImport.filePath, targetRef).then(
+          (blob) => blob.toString('utf8'),
+          () => null,
+        );
+        fileContents.set(commentImport.filePath, content);
+      }
+      const text = await content;
+      return text === null ? '' : selectLines(text, commentImport.position.line);
+    };
+
+    for (const commentImport of commentImports) {
+      const { reviewer, title } = commentImport;
+      if (commentImport.type !== 'thread' || commentImport.kind !== 'finding') {
+        continue;
+      }
+      if (!reviewer || !title) {
+        continue;
+      }
+
+      const fingerprint = computeFindingFingerprint({
+        id: commentImport.id,
+        reviewer,
+        filePath: commentImport.filePath,
+        title,
+        lineContent: commentImport.id ? '' : await readFindingLineContent(commentImport),
+      });
+      const previousDecision = decisionStore.get(fingerprint)?.decision;
+      findingHistories.set(commentImport, {
+        fingerprint,
+        ...(previousDecision ? { previousDecision } : {}),
+        ...(previousDecision === 'rejected' ? { decision: previousDecision } : {}),
+      });
+    }
+
+    return (commentImport: CommentImport) => findingHistories.get(commentImport);
+  }
+
   const commentSessions = new Map<string, CommentSessionState>();
-  const initialCommentThreads = mergeCommentImports([], initialCommentImports).threads;
+  const initialCommentThreads = mergeCommentImports(
+    [],
+    initialCommentImports,
+    await resolveFindingHistories(initialCommentImports, initialSelection.targetCommitish),
+  ).threads;
   if (initialCommentThreads.length > 0) {
     commentSessions.set(createCommentSessionKey(currentCommentSelection), {
       threads: initialCommentThreads,
@@ -334,6 +457,7 @@ export async function startServer(
     }
 
     currentSelection = requestedSelection;
+    currentDiffFilePaths = new Set(responseDiffData.files.map((file) => file.path));
 
     currentCommentSelection = createResolvedCommentSelection(
       responseDiffData,
@@ -731,7 +855,21 @@ export async function startServer(
     return true;
   }
 
-  app.post('/api/comments', (req, res) => {
+  async function persistFindingDecisions(
+    previousThreads: DiffCommentThread[],
+    nextThreads: DiffCommentThread[],
+  ) {
+    if (!decisionStore) {
+      return;
+    }
+    try {
+      await syncFindingDecisions(decisionStore, previousThreads, nextThreads);
+    } catch (error) {
+      console.warn('Failed to save finding decisions:', error);
+    }
+  }
+
+  app.post('/api/comments', async (req, res) => {
     try {
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
       const body: unknown =
@@ -746,8 +884,10 @@ export async function startServer(
       const resolvedThreads = isStale
         ? mergeCommentThreads(session.threads, nextThreads).threads
         : nextThreads;
+      const previousThreads = session.threads;
 
       updateCommentSession(selection, resolvedThreads);
+      await persistFindingDecisions(previousThreads, resolvedThreads);
 
       res.json({
         success: true,
@@ -761,15 +901,19 @@ export async function startServer(
     }
   });
 
-  app.post('/api/comment-imports', (req, res) => {
+  app.post('/api/comment-imports', async (req, res) => {
     try {
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
-      const session = getOrCreateCommentSession(selection);
       const commentImports = parseCommentImportsPayload(req.body);
       const importId = createHash('sha256')
         .update(serializeCommentImports(commentImports))
         .digest('hex');
-      const merged = mergeCommentImports(session.threads, commentImports);
+      const resolveFindingHistory = await resolveFindingHistories(
+        commentImports,
+        selection.targetCommitish,
+      );
+      const session = getOrCreateCommentSession(selection);
+      const merged = mergeCommentImports(session.threads, commentImports, resolveFindingHistory);
       const changed = updateCommentSession(selection, merged.threads);
 
       res.json({
@@ -817,13 +961,156 @@ export async function startServer(
   app.get('/api/comments-output', (req, res) => {
     const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
     const session = getOrCreateCommentSession(selection);
+    const outputThreads = selectThreadsForOutput(session.threads);
     res.type('text/plain');
 
-    if (session.threads.length > 0) {
-      const output = formatCommentsOutput(session.threads.map(toCommentThread));
+    if (outputThreads.length > 0) {
+      const output = formatCommentsOutput(outputThreads.map(toCommentThread));
       res.send(output);
     } else {
       res.send('');
+    }
+  });
+
+  app.get('/api/overview', (_req, res) => {
+    res.json({ markdown: reviewContext.getOverview() });
+  });
+
+  app.put('/api/overview', (req, res) => {
+    const markdown = parseOverviewPayload(req.body);
+    if (markdown === null) {
+      res.status(400).json({ error: 'Invalid overview payload' });
+      return;
+    }
+
+    if (reviewContext.setOverview(markdown)) {
+      fileWatcher.broadcast({ type: 'overviewChanged', timestamp: new Date().toISOString() });
+    }
+    res.json({ success: true });
+  });
+
+  app.get('/api/reviewers', (_req, res) => {
+    res.json({ reviewers: reviewContext.getReviewers() });
+  });
+
+  app.post('/api/reviewers', (req, res) => {
+    const reviewer = parseReviewerPayload(req.body);
+    if (!reviewer) {
+      res.status(400).json({ error: 'Invalid reviewer payload' });
+      return;
+    }
+
+    if (reviewContext.setReviewerStatus(reviewer.name, reviewer.status)) {
+      fileWatcher.broadcast({ type: 'reviewersChanged', timestamp: new Date().toISOString() });
+    }
+    res.json({ success: true });
+  });
+
+  const lspManager = createLspManager({
+    repoPath: repositoryPath,
+    isInDiff: (filePath) => currentDiffFilePaths.has(filePath),
+  });
+
+  function getLspDisabledReason(): string | undefined {
+    if (options.stdinDiff) {
+      return 'Symbol lookup is not available for stdin or --pr diffs';
+    }
+    if (!LSP_TARGET_COMMITISHES.has(currentSelection.targetCommitish)) {
+      return 'Symbol lookup needs the checked-out code on the new side (HEAD, working, or .)';
+    }
+    return undefined;
+  }
+
+  function parseLspPositionRequest(body: unknown): LspPositionRequest | null {
+    const payload = parseJsonObject(body);
+    if (!payload) {
+      return null;
+    }
+    const { filePath, line, character } = payload;
+    const filePathResult = parseRepositoryRelativePath(filePath);
+    if (!filePathResult.ok) {
+      return null;
+    }
+    if (typeof line !== 'number' || !Number.isInteger(line) || line < 1) {
+      return null;
+    }
+    if (typeof character !== 'number' || !Number.isInteger(character) || character < 0) {
+      return null;
+    }
+    return { filePath: filePathResult.path, line, character };
+  }
+
+  function getLspErrorStatus(error: unknown): number {
+    if (error instanceof LspUnsupportedFileError) {
+      return 400;
+    }
+    if (error instanceof LspUnavailableError) {
+      return 503;
+    }
+    if (error instanceof LspRequestTimeoutError) {
+      return 504;
+    }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return 404;
+    }
+    return 500;
+  }
+
+  app.get('/api/lsp/status', (_req, res) => {
+    const reason = getLspDisabledReason();
+    const response: LspStatusResponse = {
+      enabled: reason === undefined,
+      ...(reason ? { reason } : {}),
+      servers: lspManager.status(),
+    };
+    res.json(response);
+  });
+
+  for (const method of ['definition', 'references'] as const) {
+    app.post(`/api/lsp/${method}`, async (req, res) => {
+      const reason = getLspDisabledReason();
+      if (reason) {
+        res.status(409).json({ error: reason });
+        return;
+      }
+
+      const request = parseLspPositionRequest(req.body);
+      if (!request) {
+        res.status(400).json({ error: 'Invalid symbol lookup payload' });
+        return;
+      }
+
+      try {
+        res.json({ locations: await lspManager[method](request) });
+      } catch (error) {
+        res.status(getLspErrorStatus(error)).json({
+          error: error instanceof Error ? error.message : 'Symbol lookup failed',
+        });
+      }
+    });
+  }
+
+  app.get('/api/lsp/file', async (req, res) => {
+    const reason = getLspDisabledReason();
+    if (reason) {
+      res.status(409).json({ error: reason });
+      return;
+    }
+
+    const filePathResult = parseRepositoryRelativePath(req.query.path);
+    if (!filePathResult.ok) {
+      res.status(400).json({ error: filePathResult.error });
+      return;
+    }
+
+    try {
+      const content = await parser.getBlobContent(filePathResult.path, 'working');
+      res.json({ content: content.toString('utf8') });
+    } catch (error) {
+      const isOutside = error instanceof Error && error.message === 'File path outside repository';
+      res
+        .status(isOutside ? 400 : 404)
+        .json({ error: isOutside ? error.message : 'File not found' });
     }
   });
 
@@ -960,8 +1247,9 @@ export async function startServer(
   // Function to output comments when server shuts down
   function outputFinalComments() {
     const session = getOrCreateCommentSession(currentCommentSelection);
-    if (session.threads.length > 0) {
-      console.log(formatCommentsOutput(session.threads.map(toCommentThread)));
+    const outputThreads = selectThreadsForOutput(session.threads);
+    if (outputThreads.length > 0) {
+      console.log(formatCommentsOutput(outputThreads.map(toCommentThread)));
     }
   }
 
@@ -1011,6 +1299,7 @@ export async function startServer(
 
           // Stop file watcher
           await fileWatcher.stop();
+          await lspManager.shutdown();
 
           outputFinalComments();
           process.exit(0);

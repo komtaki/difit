@@ -2,11 +2,12 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 // Set environment variable to skip fetch mocking
 process.env.VITEST_SERVER_TEST = 'true';
 
+import { FileWatcherService } from './file-watcher.js';
 import { startServer } from './server.js';
 import type { CommentImport } from '../types/diff.js';
 
@@ -96,6 +97,19 @@ vi.mock('./git-diff.js', () => {
   }
 
   return { GitDiffParser: GitDiffParserMock };
+});
+
+// Only temporary repositories get a real decision store, so tests never write into this checkout's .git.
+vi.mock('./decision-store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./decision-store.js')>();
+  const { tmpdir: getTmpdir } = await import('os');
+  return {
+    ...actual,
+    createDecisionStore: (options: Parameters<typeof actual.createDecisionStore>[0]) =>
+      options.repoPath.startsWith(getTmpdir())
+        ? actual.createDecisionStore(options)
+        : Promise.resolve(null),
+  };
 });
 
 describe('Server Integration Tests', () => {
@@ -1018,6 +1032,163 @@ describe('Server Integration Tests', () => {
       expect(threads).toHaveLength(1);
     });
 
+    it.each([
+      { label: 'current', staleBy: 0 },
+      { label: 'stale', staleBy: 1 },
+    ])(
+      'POST /api/comments keeps finding metadata written back with a $label baseVersion',
+      async ({ staleBy }) => {
+        await fetch(`http://localhost:${port}/api/comment-imports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'thread',
+            kind: 'finding',
+            reviewer: 'correctness',
+            severity: 'warn',
+            title: 'Possible null dereference',
+            filePath: 'src/finding.ts',
+            position: { side: 'new', line: 7 },
+            body: 'value may be null here',
+            author: 'AI',
+          }),
+        });
+
+        const importedResponse = await fetch(`http://localhost:${port}/api/comments-json`);
+        const imported = (await importedResponse.json()) as any;
+        const [thread] = imported.threads;
+        expect(thread.kind).toBe('finding');
+
+        await fetch(`http://localhost:${port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseVersion: imported.version - staleBy,
+            threads: [{ ...thread, finding: { ...thread.finding, decision: 'adopted' } }],
+          }),
+        });
+
+        const response = await fetch(`http://localhost:${port}/api/comments-json`);
+        const data = (await response.json()) as any;
+
+        expect(data.threads).toHaveLength(1);
+        expect(data.threads[0].kind).toBe('finding');
+        expect(data.threads[0].finding).toEqual({
+          reviewer: 'correctness',
+          severity: 'warn',
+          title: 'Possible null dereference',
+          decision: 'adopted',
+        });
+      },
+    );
+
+    it('GET /api/comments-output includes only adopted or replied AI threads', async () => {
+      const aiThread = (overrides: Record<string, unknown>) => ({
+        type: 'thread',
+        position: { side: 'new', line: 1 },
+        author: 'AI',
+        ...overrides,
+      });
+
+      await fetch(`http://localhost:${port}/api/comment-imports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+          aiThread({ filePath: 'src/plain.ts', body: 'Human comment' }),
+          aiThread({
+            filePath: 'src/explained.ts',
+            kind: 'explanation',
+            body: 'Silent explanation',
+          }),
+          aiThread({
+            filePath: 'src/undecided.ts',
+            kind: 'finding',
+            reviewer: 'security',
+            severity: 'info',
+            title: 'Undecided',
+            body: 'Undecided finding',
+          }),
+          aiThread({
+            id: 'adopt-me',
+            filePath: 'src/adopted.ts',
+            kind: 'finding',
+            reviewer: 'correctness',
+            severity: 'error',
+            title: 'Adopted',
+            body: 'Adopted finding',
+          }),
+        ]),
+      });
+
+      const jsonResponse = await fetch(`http://localhost:${port}/api/comments-json`);
+      const data = (await jsonResponse.json()) as any;
+      await fetch(`http://localhost:${port}/api/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseVersion: data.version,
+          threads: data.threads.map((thread: any) =>
+            thread.id === 'adopt-me'
+              ? { ...thread, finding: { ...thread.finding, decision: 'adopted' } }
+              : thread,
+          ),
+        }),
+      });
+
+      const response = await fetch(`http://localhost:${port}/api/comments-output`);
+      const output = await response.text();
+
+      expect(output).toContain('src/plain.ts:L1\nHuman comment');
+      expect(output).toContain('src/adopted.ts:L1\n[AI:correctness] Adopted finding');
+      expect(output).not.toContain('Silent explanation');
+      expect(output).not.toContain('Undecided finding');
+      expect(output).toContain('Total comments: 2');
+    });
+
+    it('GET /api/comments-output is empty when only unadopted AI threads exist', async () => {
+      await fetch(`http://localhost:${port}/api/comment-imports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'thread',
+          kind: 'explanation',
+          filePath: 'src/explained.ts',
+          position: { side: 'new', line: 1 },
+          body: 'Silent explanation',
+        }),
+      });
+
+      const response = await fetch(`http://localhost:${port}/api/comments-output`);
+
+      expect(await response.text()).toBe('');
+    });
+
+    it('POST /api/comment-imports deduplicates identical finding imports', async () => {
+      const findingImport = {
+        type: 'thread',
+        kind: 'finding',
+        reviewer: 'correctness',
+        severity: 'error',
+        title: 'Duplicate finding',
+        filePath: 'src/finding-dedup.ts',
+        position: { side: 'new', line: 2 },
+        body: 'Same finding twice',
+      };
+
+      for (let i = 0; i < 2; i++) {
+        await fetch(`http://localhost:${port}/api/comment-imports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(findingImport),
+        });
+      }
+
+      const response = await fetch(`http://localhost:${port}/api/comments-json`);
+      const data = (await response.json()) as any;
+
+      expect(data.threads).toHaveLength(1);
+    });
+
     it('DELETE /api/comments/:threadId removes the thread and bumps the version', async () => {
       await fetch(`http://localhost:${port}/api/comment-imports`, {
         method: 'POST',
@@ -1269,6 +1440,110 @@ describe('Server Integration Tests', () => {
 
       expect(response.status).toBe(400);
       expect(data).toHaveProperty('error', 'Generated status is not available for stdin diff');
+    });
+  });
+
+  describe('Review context API', () => {
+    let port: number;
+    let broadcastSpy: MockInstance<FileWatcherService['broadcast']>;
+
+    beforeEach(async () => {
+      broadcastSpy = vi.spyOn(FileWatcherService.prototype, 'broadcast');
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9090,
+        overview: '# Initial overview',
+      });
+      servers.push(result.server);
+      port = result.port;
+    });
+
+    afterEach(() => {
+      broadcastSpy.mockRestore();
+    });
+
+    const sendJson = (path: string, method: string, body: unknown) =>
+      fetch(`http://localhost:${port}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    it('GET /api/overview returns the overview passed at startup', async () => {
+      const response = await fetch(`http://localhost:${port}/api/overview`);
+
+      expect(await response.json()).toEqual({ markdown: '# Initial overview' });
+    });
+
+    it('GET /api/overview returns null when no overview was given', async () => {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9095,
+      });
+      servers.push(result.server);
+
+      const response = await fetch(`http://localhost:${result.port}/api/overview`);
+
+      expect(await response.json()).toEqual({ markdown: null });
+    });
+
+    it('PUT /api/overview stores the overview and broadcasts the change', async () => {
+      const putResponse = await sendJson('/api/overview', 'PUT', { markdown: '# Updated' });
+
+      expect(await putResponse.json()).toEqual({ success: true });
+      const response = await fetch(`http://localhost:${port}/api/overview`);
+      expect(await response.json()).toEqual({ markdown: '# Updated' });
+      expect(broadcastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'overviewChanged' }),
+      );
+    });
+
+    it('PUT /api/overview does not broadcast when the overview is unchanged', async () => {
+      await sendJson('/api/overview', 'PUT', { markdown: '# Initial overview' });
+
+      expect(broadcastSpy).not.toHaveBeenCalled();
+    });
+
+    it.each([{}, { markdown: 1 }, 'not json'])(
+      'PUT /api/overview rejects an invalid body %j',
+      async (body) => {
+        const response = await sendJson('/api/overview', 'PUT', body);
+
+        expect(response.status).toBe(400);
+      },
+    );
+
+    it('GET /api/reviewers returns an empty list by default', async () => {
+      const response = await fetch(`http://localhost:${port}/api/reviewers`);
+
+      expect(await response.json()).toEqual({ reviewers: [] });
+    });
+
+    it('POST /api/reviewers updates reviewer status and broadcasts the change', async () => {
+      await sendJson('/api/reviewers', 'POST', { name: 'correctness', status: 'running' });
+      await sendJson('/api/reviewers', 'POST', { name: 'correctness', status: 'done' });
+
+      const response = await fetch(`http://localhost:${port}/api/reviewers`);
+      const data = (await response.json()) as any;
+
+      expect(data.reviewers).toEqual([
+        { name: 'correctness', status: 'done', updatedAt: expect.any(String) },
+      ]);
+      expect(broadcastSpy).toHaveBeenCalledTimes(2);
+      expect(broadcastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'reviewersChanged' }),
+      );
+    });
+
+    it.each([
+      {},
+      { name: '', status: 'running' },
+      { name: 'correctness' },
+      { name: 'correctness', status: 'paused' },
+    ])('POST /api/reviewers rejects an invalid body %j', async (body) => {
+      const response = await sendJson('/api/reviewers', 'POST', body);
+
+      expect(response.status).toBe(400);
     });
   });
 
@@ -1640,6 +1915,305 @@ describe('Server Integration Tests', () => {
 
       // Without keepAlive, process.exit SHOULD have been called
       expect(process.exit).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('Finding decisions', () => {
+    let repoPath: string;
+
+    const findingImport = (line: number) => ({
+      type: 'thread',
+      kind: 'finding',
+      reviewer: 'correctness',
+      severity: 'warn',
+      title: 'Possible null dereference',
+      filePath: 'src/finding.ts',
+      position: { side: 'new', line },
+      body: 'value may be null here',
+      author: 'AI',
+    });
+
+    async function startRound(preferredPort: number, fileContent: string) {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort,
+        repoPath,
+      });
+      servers.push(result.server);
+      parserInstances.at(-1).getBlobContent.mockResolvedValue(Buffer.from(fileContent));
+      return result.port;
+    }
+
+    async function importFindings(port: number, imports: unknown[]) {
+      await fetch(`http://localhost:${port}/api/comment-imports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(imports),
+      });
+      const response = await fetch(`http://localhost:${port}/api/comments-json`);
+      return (await response.json()) as any;
+    }
+
+    async function decide(port: number, session: any, decisions: Record<string, string>) {
+      await fetch(`http://localhost:${port}/api/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseVersion: session.version,
+          threads: session.threads.map((thread: any) => ({
+            ...thread,
+            finding: { ...thread.finding, decision: decisions[thread.finding.title] },
+          })),
+        }),
+      });
+    }
+
+    beforeEach(async () => {
+      const { execFileSync } = await import('child_process');
+      repoPath = await fs.mkdtemp(join(tmpdir(), 'difit-server-decisions-'));
+      execFileSync('git', ['init', '--quiet', '-b', 'main'], { cwd: repoPath });
+    });
+
+    afterEach(async () => {
+      await fs.rm(repoPath, { recursive: true, force: true });
+    });
+
+    it('carries decisions over to the next round even when line numbers shift', async () => {
+      const firstPort = await startRound(9100, 'a\nb\nreturn value.name;\n');
+      const firstSession = await importFindings(firstPort, [
+        findingImport(3),
+        { ...findingImport(1), id: 'adopt-me', title: 'Adopted finding' },
+      ]);
+      expect(firstSession.threads[0].finding.fingerprint).toEqual(expect.any(String));
+      expect(firstSession.threads[0].finding).not.toHaveProperty('previousDecision');
+
+      await decide(firstPort, firstSession, {
+        'Possible null dereference': 'rejected',
+        'Adopted finding': 'adopted',
+      });
+
+      const secondPort = await startRound(9105, 'x\na\nb\n    return value.name;\n');
+      const secondSession = await importFindings(secondPort, [
+        findingImport(4),
+        { ...findingImport(9), id: 'adopt-me', title: 'Adopted finding' },
+      ]);
+
+      const [rejected, adopted] = secondSession.threads;
+      expect(rejected.finding).toMatchObject({
+        decision: 'rejected',
+        previousDecision: 'rejected',
+      });
+      expect(adopted.finding.previousDecision).toBe('adopted');
+      expect(adopted.finding).not.toHaveProperty('decision');
+    });
+
+    it('forgets a decision once it is withdrawn', async () => {
+      const port = await startRound(9110, 'a\nb\nreturn value.name;\n');
+      const session = await importFindings(port, [findingImport(3)]);
+      await decide(port, session, { 'Possible null dereference': 'rejected' });
+      const decided = (await (
+        await fetch(`http://localhost:${port}/api/comments-json`)
+      ).json()) as any;
+      await decide(port, decided, {});
+
+      const nextPort = await startRound(9115, 'a\nb\nreturn value.name;\n');
+      const nextSession = await importFindings(nextPort, [findingImport(3)]);
+
+      expect(nextSession.threads[0].finding).not.toHaveProperty('previousDecision');
+      expect(nextSession.threads[0].finding).not.toHaveProperty('decision');
+    });
+
+    describe('when a client posts findings without history on a stale baseVersion', () => {
+      async function decideWithoutHistory(port: number, session: any, decision?: string) {
+        await fetch(`http://localhost:${port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseVersion: session.version - 1,
+            threads: session.threads.map((thread: any) => {
+              const { reviewer, severity, title } = thread.finding;
+              return { ...thread, finding: { reviewer, severity, title, decision } };
+            }),
+          }),
+        });
+        const response = await fetch(`http://localhost:${port}/api/comments-json`);
+        return (await response.json()) as any;
+      }
+
+      it('keeps the fingerprint so the decision carries over to the next round', async () => {
+        const port = await startRound(9125, 'a\nb\nreturn value.name;\n');
+        const session = await importFindings(port, [findingImport(3)]);
+
+        const decided = await decideWithoutHistory(port, session, 'adopted');
+        expect(decided.threads[0].finding.fingerprint).toBe(session.threads[0].finding.fingerprint);
+
+        const nextPort = await startRound(9130, 'a\nb\nreturn value.name;\n');
+        const nextSession = await importFindings(nextPort, [findingImport(3)]);
+        expect(nextSession.threads[0].finding.previousDecision).toBe('adopted');
+      });
+
+      it('forgets a decision removed by the client', async () => {
+        const port = await startRound(9135, 'a\nb\nreturn value.name;\n');
+        const session = await importFindings(port, [findingImport(3)]);
+        const decided = await decideWithoutHistory(port, session, 'rejected');
+
+        const withdrawn = await decideWithoutHistory(port, decided);
+        expect(withdrawn.threads[0].finding).not.toHaveProperty('decision');
+
+        const nextPort = await startRound(9140, 'a\nb\nreturn value.name;\n');
+        const nextSession = await importFindings(nextPort, [findingImport(3)]);
+        expect(nextSession.threads[0].finding).not.toHaveProperty('previousDecision');
+      });
+    });
+
+    it('does not track decisions for stdin diffs', async () => {
+      const result = await startServer({
+        stdinDiff: 'diff --git a/a b/a',
+        preferredPort: 9120,
+        repoPath,
+      });
+      servers.push(result.server);
+
+      const session = await importFindings(result.port, [findingImport(3)]);
+
+      expect(session.threads[0].finding).not.toHaveProperty('fingerprint');
+    });
+  });
+
+  describe('Language server API', () => {
+    let repoPath: string;
+    const originalPath = process.env.PATH;
+
+    async function startLspServer(preferredPort: number, targetCommitish = 'HEAD') {
+      const result = await startServer({
+        selection: { targetCommitish, baseCommitish: 'HEAD^' },
+        preferredPort,
+        repoPath,
+      });
+      servers.push(result.server);
+      return result.port;
+    }
+
+    const lookup = (port: number, method: string, body: unknown) =>
+      fetch(`http://localhost:${port}/api/lsp/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    beforeEach(async () => {
+      repoPath = await fs.mkdtemp(join(tmpdir(), 'difit-server-lsp-'));
+      await fs.mkdir(join(repoPath, 'src'));
+      await fs.writeFile(join(repoPath, 'src', 'a.ts'), 'export const a = 1;\n');
+      process.env.PATH = join(repoPath, 'empty-bin');
+    });
+
+    afterEach(async () => {
+      process.env.PATH = originalPath;
+      await fs.rm(repoPath, { recursive: true, force: true });
+    });
+
+    it.each(['HEAD', 'working', '.'])('is enabled when the target is %s', async (target) => {
+      const port = await startLspServer(9130, target);
+
+      const response = await fetch(`http://localhost:${port}/api/lsp/status`);
+
+      expect(await response.json()).toEqual({
+        enabled: true,
+        servers: [
+          { language: 'ruby', state: 'idle' },
+          { language: 'typescript', state: 'idle' },
+          { language: 'python', state: 'idle' },
+        ],
+      });
+    });
+
+    it('is disabled for other targets and refuses lookups', async () => {
+      const port = await startLspServer(9135, 'staged');
+
+      const status = (await (await fetch(`http://localhost:${port}/api/lsp/status`)).json()) as any;
+      const response = await lookup(port, 'definition', {
+        filePath: 'src/a.ts',
+        line: 1,
+        character: 13,
+      });
+      const file = await fetch(`http://localhost:${port}/api/lsp/file?path=src/a.ts`);
+
+      expect(status.enabled).toBe(false);
+      expect(status.reason).toEqual(expect.any(String));
+      expect(response.status).toBe(409);
+      expect(file.status).toBe(409);
+    });
+
+    it('is disabled for stdin diffs', async () => {
+      const result = await startServer({
+        stdinDiff: 'diff --git a/a b/a',
+        preferredPort: 9140,
+        repoPath,
+      });
+      servers.push(result.server);
+
+      const response = await fetch(`http://localhost:${result.port}/api/lsp/status`);
+
+      expect(((await response.json()) as any).enabled).toBe(false);
+    });
+
+    it.each([
+      { filePath: '../outside.ts', line: 1, character: 0 },
+      { filePath: 'src/a.ts', line: 0, character: 0 },
+      { filePath: 'src/a.ts', line: 1, character: -1 },
+      { filePath: 'src/a.ts', line: 1.5, character: 0 },
+      { line: 1, character: 0 },
+    ])('rejects an invalid lookup body %j', async (body) => {
+      const port = await startLspServer(9145);
+
+      const response = await lookup(port, 'references', body);
+
+      expect(response.status).toBe(400);
+    });
+
+    it('rejects a file no language server handles', async () => {
+      const port = await startLspServer(9150);
+
+      const response = await lookup(port, 'definition', {
+        filePath: 'README.md',
+        line: 1,
+        character: 0,
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('reports a missing language server as unavailable without breaking the diff', async () => {
+      const port = await startLspServer(9155);
+
+      const response = await lookup(port, 'definition', {
+        filePath: 'src/a.ts',
+        line: 1,
+        character: 13,
+      });
+      const status = (await (await fetch(`http://localhost:${port}/api/lsp/status`)).json()) as any;
+      const diff = await fetch(`http://localhost:${port}/api/diff`);
+
+      expect(response.status).toBe(503);
+      expect(status.servers).toContainEqual({
+        language: 'typescript',
+        state: 'unavailable',
+        detail: expect.stringContaining('ENOENT'),
+      });
+      expect(diff.status).toBe(200);
+    });
+
+    it('serves repository files from the working tree', async () => {
+      const port = await startLspServer(9160);
+      parserInstances.at(-1).getBlobContent.mockResolvedValue(Buffer.from('export const a = 1;\n'));
+
+      const response = await fetch(`http://localhost:${port}/api/lsp/file?path=src/a.ts`);
+      const outside = await fetch(`http://localhost:${port}/api/lsp/file?path=../etc/passwd`);
+
+      expect(await response.json()).toEqual({ content: 'export const a = 1;\n' });
+      expect(parserInstances.at(-1).getBlobContent).toHaveBeenCalledWith('src/a.ts', 'working');
+      expect(outside.status).toBe(400);
     });
   });
 

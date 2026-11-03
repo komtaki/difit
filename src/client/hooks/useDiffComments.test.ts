@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import type { DiffContextStorage } from '../../types/diff';
+import type { DiffCommentThread, DiffContextStorage } from '../../types/diff';
 import { useDiffComments } from './useDiffComments';
 
 // Mock StorageService
@@ -216,6 +216,61 @@ const next = true;
       expect(prompt).toContain('const prev = false;');
       expect(prompt).toContain('SUGGESTED:');
       expect(prompt).toContain('const next = true;');
+    });
+
+    it('should include AI threads with the same selection rule as stdout output', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+      const timestamp = '2024-01-01T00:00:00.000Z';
+      const createThread = (
+        id: string,
+        line: number,
+        review: Pick<DiffCommentThread, 'kind' | 'finding'>,
+        replies: string[] = [],
+      ): DiffCommentThread => ({
+        id,
+        filePath: 'src/a.ts',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        position: { side: 'new', line },
+        messages: [id, ...replies].map((body, index) => ({
+          id: `${id}-${index}`,
+          body,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+        ...review,
+      });
+      const finding = { reviewer: 'correctness', severity: 'warn', title: 'T' } as const;
+
+      act(() => {
+        result.current.replaceThreads([
+          createThread('human', 1, {}),
+          createThread('silent explanation', 2, { kind: 'explanation' }),
+          createThread('replied explanation', 3, { kind: 'explanation' }, ['why?']),
+          createThread('undecided finding', 4, { kind: 'finding', finding }),
+          createThread('adopted finding', 5, {
+            kind: 'finding',
+            finding: { ...finding, decision: 'adopted' },
+          }),
+          createThread('replied finding', 6, { kind: 'finding', finding }, ['not sure']),
+        ]);
+      });
+
+      expect(result.current.generateAllCommentsPrompt()).toBe(`src/a.ts:L1
+human
+=====
+src/a.ts:L3
+replied explanation
+Reply 1 (Unknown)
+why?
+=====
+src/a.ts:L5
+[AI:correctness] adopted finding
+=====
+src/a.ts:L6
+replied finding
+Reply 1 (Unknown)
+not sure`);
     });
   });
 
@@ -499,6 +554,80 @@ const next = true;
       expect(result.current.threads[0]?.id).toBe(threadId);
       expect(result.current.threads[0]?.messages).toHaveLength(2);
       expect(result.current.threads[0]?.messages[1]?.body).toBe('Reply comment');
+    });
+  });
+
+  describe('setFindingDecision', () => {
+    const findingThread: DiffCommentThread = {
+      id: 'finding-1',
+      filePath: 'src/a.ts',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      position: { side: 'new', line: 3 },
+      messages: [
+        {
+          id: 'finding-1',
+          body: 'Possible null dereference',
+          author: 'correctness',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+      kind: 'finding',
+      finding: {
+        reviewer: 'correctness',
+        severity: 'warn',
+        title: 'Null check',
+        fingerprint: 'fp-1',
+        previousDecision: 'adopted',
+      },
+    };
+
+    it('updates the decision while keeping the rest of the finding metadata', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+
+      act(() => {
+        result.current.replaceThreads([findingThread]);
+      });
+      act(() => {
+        result.current.setFindingDecision('finding-1', 'adopted');
+      });
+
+      expect(result.current.threads[0]?.finding).toEqual({
+        ...findingThread.finding,
+        decision: 'adopted',
+      });
+      expect(mockDiffContextData?.threads[0]?.finding?.decision).toBe('adopted');
+    });
+
+    it('clears the decision when undefined is given', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+
+      act(() => {
+        result.current.replaceThreads([
+          { ...findingThread, finding: { ...findingThread.finding!, decision: 'rejected' } },
+        ]);
+      });
+      act(() => {
+        result.current.setFindingDecision('finding-1', undefined);
+      });
+
+      expect(result.current.threads[0]?.finding?.decision).toBeUndefined();
+      expect(result.current.threads[0]?.finding?.fingerprint).toBe('fp-1');
+    });
+
+    it('ignores threads that are not findings', () => {
+      const { result } = renderHook(() => useDiffComments('main', 'feature-branch', 'abc123'));
+
+      act(() => {
+        result.current.addThread({ filePath: 'src/a.ts', body: 'Human', side: 'new', line: 1 });
+      });
+      const [thread] = result.current.threads;
+      act(() => {
+        result.current.setFindingDecision(thread!.id, 'adopted');
+      });
+
+      expect(result.current.threads[0]).toEqual(thread);
     });
   });
 });

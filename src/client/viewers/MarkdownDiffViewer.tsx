@@ -205,7 +205,7 @@ const stripFrontmatterBlocks = (
   return result;
 };
 
-const getMarkdownComponents = (syntaxTheme?: DiffViewerBodyProps['syntaxTheme']) => ({
+export const getMarkdownComponents = (syntaxTheme?: DiffViewerBodyProps['syntaxTheme']) => ({
   h1: ({ children }: { children?: React.ReactNode }) => (
     <h1 className={`${headingStyles[0]} mt-6 mb-2 first:mt-0`}>{children}</h1>
   ),

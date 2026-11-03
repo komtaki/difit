@@ -11,7 +11,7 @@ interface CommentImportResponse {
   warnings?: string[];
 }
 
-function handleCommandError(error: unknown, port: number): never {
+export function handleCommandError(error: unknown, port: number): never {
   if (error instanceof TypeError && error.message.includes('fetch failed')) {
     console.error(`Error: Cannot connect to difit server on port ${port}. Is the server running?`);
   } else {

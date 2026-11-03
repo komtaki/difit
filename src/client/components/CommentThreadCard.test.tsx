@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CommentThread } from '../../types/diff';
+import type { CommentThread, DiffCommentThread, FindingMeta, ThreadKind } from '../../types/diff';
+import { ReviewThreadProvider } from '../contexts/ReviewThreadContext';
 
 import { CommentThreadCard } from './CommentThreadCard';
 
@@ -416,5 +417,168 @@ describe('CommentThreadCard', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
 
     expect(onRemoveMessage).toHaveBeenCalledWith('thread-1', 'message-2');
+  });
+
+  describe('review threads', () => {
+    const toDiffThread = (kind: ThreadKind, finding?: FindingMeta): DiffCommentThread => ({
+      id: mockThread.id,
+      filePath: mockThread.file,
+      createdAt: mockThread.createdAt,
+      updatedAt: mockThread.updatedAt,
+      position: { side: 'new', line: 80 },
+      messages: mockThread.messages,
+      kind,
+      ...(finding ? { finding } : {}),
+    });
+
+    const baseFinding: FindingMeta = {
+      reviewer: 'correctness',
+      severity: 'warn',
+      title: 'Missing null check',
+    };
+
+    const renderReviewCard = (diffThread: DiffCommentThread, onSetFindingDecision = vi.fn()) => {
+      render(
+        <ReviewThreadProvider threads={[diffThread]} onSetFindingDecision={onSetFindingDecision}>
+          <CommentThreadCard
+            thread={mockThread}
+            onGeneratePrompt={() => 'thread prompt'}
+            onRemoveThread={vi.fn()}
+            onReplyToThread={vi.fn().mockResolvedValue(undefined)}
+            onRemoveMessage={vi.fn()}
+            onUpdateMessage={vi.fn()}
+          />
+        </ReviewThreadProvider>,
+      );
+      return onSetFindingDecision;
+    };
+
+    it('renders explanations expanded and collapses them from the header', async () => {
+      const user = userEvent.setup();
+      renderReviewCard(toDiffThread('explanation'));
+
+      const card = document.getElementById('comment-thread-thread-1');
+      expect(card).toHaveAttribute('data-thread-kind', 'explanation');
+      expect(screen.getByText('Root comment')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Explanation' }));
+
+      expect(screen.queryByText('Reply comment')).not.toBeInTheDocument();
+    });
+
+    it('renders a finding header with severity, title and reviewer', () => {
+      renderReviewCard(toDiffThread('finding', baseFinding));
+
+      expect(document.getElementById('comment-thread-thread-1')).toHaveAttribute(
+        'data-thread-kind',
+        'finding',
+      );
+      expect(screen.getByText('warn')).toBeInTheDocument();
+      expect(screen.getByText('Missing null check')).toBeInTheDocument();
+      expect(screen.getByText('correctness')).toBeInTheDocument();
+    });
+
+    it('gives the finding title its own full-width row below the header', () => {
+      renderReviewCard(toDiffThread('finding', baseFinding));
+
+      const title = screen.getByText('Missing null check');
+      const severity = screen.getByText('warn');
+      const headerInfo = severity.parentElement;
+      const header = headerInfo?.parentElement;
+      const actions = screen.getByRole('button', { name: 'Adopt' }).parentElement;
+
+      expect(header).toHaveClass('flex-wrap');
+      expect(headerInfo).toHaveClass('flex-wrap', 'flex-auto');
+      expect(headerInfo).not.toHaveClass('flex-1');
+      expect(headerInfo).not.toHaveClass('min-w-0');
+      expect(headerInfo).toContainElement(screen.getByText('correctness'));
+      expect(actions).toHaveClass('flex-wrap');
+      expect(actions).toContainElement(screen.getByTitle('Copy thread prompt for AI coding agent'));
+      expect(header).not.toContainElement(title);
+      expect(title).toHaveClass('w-full', 'break-words');
+      expect(title.parentElement).toBe(header?.parentElement);
+      expect(header?.nextElementSibling).toBe(title);
+    });
+
+    it('lets the explanation header wrap instead of squeezing the file label', () => {
+      renderReviewCard(toDiffThread('explanation'));
+
+      const headerInfo = screen.getByRole('button', { name: 'Explanation' }).parentElement;
+
+      expect(headerInfo).toHaveClass('flex-wrap');
+      expect(headerInfo?.parentElement).toHaveClass('flex-wrap');
+    });
+
+    it('keeps the single-line header for human comments', () => {
+      renderReviewCard({ ...toDiffThread('comment'), kind: undefined });
+
+      const headerInfo = screen.getByRole('button', { name: 'Collapse thread' }).parentElement;
+
+      expect(headerInfo).not.toHaveClass('flex-wrap');
+      expect(headerInfo).toHaveClass('min-w-0', 'flex-1');
+      expect(headerInfo?.parentElement).not.toHaveClass('flex-wrap');
+    });
+
+    it('adopts and rejects a finding', async () => {
+      const user = userEvent.setup();
+      const onSetFindingDecision = renderReviewCard(toDiffThread('finding', baseFinding));
+
+      await user.click(screen.getByRole('button', { name: 'Adopt' }));
+      await user.click(screen.getByRole('button', { name: 'Reject' }));
+
+      expect(onSetFindingDecision).toHaveBeenNthCalledWith(1, 'thread-1', 'adopted');
+      expect(onSetFindingDecision).toHaveBeenNthCalledWith(2, 'thread-1', 'rejected');
+    });
+
+    it('withdraws the adoption from the Adopted button', async () => {
+      const user = userEvent.setup();
+      const onSetFindingDecision = renderReviewCard(
+        toDiffThread('finding', { ...baseFinding, decision: 'adopted' }),
+      );
+
+      expect(screen.queryByRole('button', { name: 'Adopt' })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Adopted' }));
+
+      expect(onSetFindingDecision).toHaveBeenCalledWith('thread-1', undefined);
+    });
+
+    it('restores a rejected finding', async () => {
+      const user = userEvent.setup();
+      const onSetFindingDecision = renderReviewCard(
+        toDiffThread('finding', { ...baseFinding, decision: 'rejected' }),
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Restore' }));
+
+      expect(onSetFindingDecision).toHaveBeenCalledWith('thread-1', undefined);
+    });
+
+    it('shows badges for decisions made in a previous round', () => {
+      renderReviewCard(toDiffThread('finding', { ...baseFinding, previousDecision: 'adopted' }));
+
+      expect(screen.getByText('Previously adopted — still unresolved?')).toBeInTheDocument();
+    });
+
+    it('shows a badge for findings rejected in a previous round', () => {
+      renderReviewCard(
+        toDiffThread('finding', {
+          ...baseFinding,
+          decision: 'rejected',
+          previousDecision: 'rejected',
+        }),
+      );
+
+      expect(screen.getByText('Previously rejected')).toBeInTheDocument();
+    });
+
+    it('keeps the comment look for threads without review metadata', () => {
+      renderReviewCard({ ...toDiffThread('comment'), kind: undefined });
+
+      expect(document.getElementById('comment-thread-thread-1')).toHaveAttribute(
+        'data-thread-kind',
+        'comment',
+      );
+      expect(screen.queryByRole('button', { name: 'Adopt' })).not.toBeInTheDocument();
+    });
   });
 });

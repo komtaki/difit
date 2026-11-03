@@ -5,14 +5,29 @@ import type {
   DiffLineRange,
   DiffCommentCodeSnapshot,
   DiffCommentMessage,
+  FindingMeta,
+  FindingSeverity,
   ReplyCommentImport,
   ThreadCommentImport,
+  ThreadKind,
 } from '../types/diff.js';
 import { createId } from './createId.js';
 
 interface MergeCommentImportsResult {
   threads: DiffCommentThread[];
   warnings: string[];
+}
+
+type ReviewImportFields = Pick<ThreadCommentImport, 'kind' | 'reviewer' | 'severity' | 'title'>;
+type ThreadReviewMeta = Pick<DiffCommentThread, 'kind' | 'finding'>;
+type FindingHistory = Pick<FindingMeta, 'fingerprint' | 'decision' | 'previousDecision'>;
+type FindingHistoryResolver = (commentImport: ThreadCommentImport) => FindingHistory | undefined;
+
+const FINDING_FIELD_NAMES = ['reviewer', 'severity', 'title'] as const;
+const REVIEW_FIELD_NAMES = ['kind', ...FINDING_FIELD_NAMES] as const;
+
+export function getThreadKind(thread: Pick<DiffCommentThread, 'kind'>): ThreadKind {
+  return thread.kind ?? 'comment';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -118,6 +133,53 @@ function normalizeRequiredBody(value: unknown): string {
   return trimmed;
 }
 
+function isThreadKind(value: unknown): value is ThreadKind {
+  return value === 'comment' || value === 'explanation' || value === 'finding';
+}
+
+function isFindingSeverity(value: unknown): value is FindingSeverity {
+  return value === 'info' || value === 'warn' || value === 'error';
+}
+
+function normalizeRequiredText(value: unknown, fieldName: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Invalid comment import field: ${fieldName}`);
+  }
+  return value.trim();
+}
+
+function rejectPresentFields(value: Record<string, unknown>, fieldNames: readonly string[]): void {
+  const presentFieldName = fieldNames.find((fieldName) => value[fieldName] !== undefined);
+  if (presentFieldName) {
+    throw new Error(`Invalid comment import field: ${presentFieldName}`);
+  }
+}
+
+function normalizeReviewImportFields(value: Record<string, unknown>): ReviewImportFields {
+  if (value.type === 'reply') {
+    rejectPresentFields(value, REVIEW_FIELD_NAMES);
+    return {};
+  }
+
+  const { kind, severity } = value;
+  if (kind !== undefined && !isThreadKind(kind)) {
+    throw new Error('Invalid comment import field: kind');
+  }
+
+  if (kind !== 'finding') {
+    rejectPresentFields(value, FINDING_FIELD_NAMES);
+    return { kind };
+  }
+
+  const reviewer = normalizeRequiredText(value.reviewer, 'reviewer');
+  if (!isFindingSeverity(severity)) {
+    throw new Error('Invalid comment import field: severity');
+  }
+  const title = normalizeRequiredText(value.title, 'title');
+
+  return { kind, reviewer, severity, title };
+}
+
 function normalizeCommentImportEntry(value: unknown): CommentImport {
   if (!isRecord(value)) {
     throw new Error('Comment import must be an object');
@@ -144,6 +206,7 @@ function normalizeCommentImportEntry(value: unknown): CommentImport {
     createdAt,
     updatedAt,
     codeSnapshot: normalizeCodeSnapshot(value.codeSnapshot),
+    ...normalizeReviewImportFields(value),
   };
 
   return normalized as CommentImport;
@@ -248,7 +311,29 @@ function sortByNewestThread(left: DiffCommentThread, right: DiffCommentThread): 
   return right.updatedAt.localeCompare(left.updatedAt);
 }
 
-function createImportedThread(commentImport: ThreadCommentImport, now: string): DiffCommentThread {
+function createThreadReviewMeta(
+  commentImport: ThreadCommentImport,
+  resolveFindingHistory: FindingHistoryResolver | undefined,
+): ThreadReviewMeta {
+  const { kind, reviewer, severity, title } = commentImport;
+  if (!kind) {
+    return {};
+  }
+  if (kind !== 'finding' || !reviewer || !severity || !title) {
+    return { kind };
+  }
+
+  return {
+    kind,
+    finding: { reviewer, severity, title, ...resolveFindingHistory?.(commentImport) },
+  };
+}
+
+function createImportedThread(
+  commentImport: ThreadCommentImport,
+  now: string,
+  resolveFindingHistory: FindingHistoryResolver | undefined,
+): DiffCommentThread {
   const { createdAt, updatedAt } = toThreadTimestamp(commentImport, now);
   const threadId = commentImport.id ?? createId();
 
@@ -268,6 +353,7 @@ function createImportedThread(commentImport: ThreadCommentImport, now: string): 
         updatedAt,
       },
     ],
+    ...createThreadReviewMeta(commentImport, resolveFindingHistory),
   };
 }
 
@@ -324,6 +410,13 @@ function cloneMessage(message: DiffCommentMessage): DiffCommentMessage {
   };
 }
 
+function cloneReviewMeta({ kind, finding }: ThreadReviewMeta): ThreadReviewMeta {
+  return {
+    ...(kind ? { kind } : {}),
+    ...(finding ? { finding: { ...finding } } : {}),
+  };
+}
+
 function cloneThread(thread: DiffCommentThread): DiffCommentThread {
   return {
     id: thread.id,
@@ -333,6 +426,7 @@ function cloneThread(thread: DiffCommentThread): DiffCommentThread {
     position: clonePosition(thread.position),
     codeSnapshot: cloneCodeSnapshot(thread.codeSnapshot),
     messages: thread.messages.map(cloneMessage),
+    ...cloneReviewMeta(thread),
   };
 }
 
@@ -386,6 +480,23 @@ function pickNewerMessage(
   return cloneMessage(existingMessage);
 }
 
+function mergeFinding(
+  existingFinding: FindingMeta | undefined,
+  incomingFinding: FindingMeta | undefined,
+): FindingMeta | undefined {
+  if (!incomingFinding || !existingFinding) {
+    return incomingFinding ?? existingFinding;
+  }
+
+  const fingerprint = incomingFinding.fingerprint ?? existingFinding.fingerprint;
+  const previousDecision = incomingFinding.previousDecision ?? existingFinding.previousDecision;
+  return {
+    ...incomingFinding,
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(previousDecision ? { previousDecision } : {}),
+  };
+}
+
 function mergeThread(
   existingThread: DiffCommentThread,
   incomingThread: DiffCommentThread,
@@ -423,6 +534,10 @@ function mergeThread(
     position: clonePosition(existingThread.position),
     codeSnapshot: cloneCodeSnapshot(incomingThread.codeSnapshot ?? existingThread.codeSnapshot),
     messages: orderedMessages,
+    ...cloneReviewMeta({
+      kind: incomingThread.kind ?? existingThread.kind,
+      finding: mergeFinding(existingThread.finding, incomingThread.finding),
+    }),
   };
 }
 
@@ -473,6 +588,10 @@ export function serializeCommentImports(commentImports: CommentImport[]): string
             language: commentImport.codeSnapshot.language,
           }
         : undefined,
+      kind: commentImport.kind,
+      reviewer: commentImport.reviewer,
+      severity: commentImport.severity,
+      title: commentImport.title,
     })),
   );
 }
@@ -480,6 +599,7 @@ export function serializeCommentImports(commentImports: CommentImport[]): string
 export function mergeCommentImports(
   existingThreads: DiffCommentThread[],
   commentImports: CommentImport[],
+  resolveFindingHistory?: FindingHistoryResolver,
 ): MergeCommentImportsResult {
   // Clone (don't shallow-copy) so appending a reply doesn't mutate the caller's
   // thread objects in place — otherwise the server can't detect the change and
@@ -496,7 +616,7 @@ export function mergeCommentImports(
         continue;
       }
 
-      threads.push(createImportedThread(commentImport, now));
+      threads.push(createImportedThread(commentImport, now, resolveFindingHistory));
       continue;
     }
 

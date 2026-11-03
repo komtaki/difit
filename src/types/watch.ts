@@ -38,11 +38,23 @@ interface CommentsChangedWatchEvent {
   timestamp: string;
 }
 
+interface OverviewChangedWatchEvent {
+  type: 'overviewChanged';
+  timestamp: string;
+}
+
+interface ReviewersChangedWatchEvent {
+  type: 'reviewersChanged';
+  timestamp: string;
+}
+
 export type WatchEvent =
   | ConnectedWatchEvent
   | ReloadWatchEvent
   | ErrorWatchEvent
-  | CommentsChangedWatchEvent;
+  | CommentsChangedWatchEvent
+  | OverviewChangedWatchEvent
+  | ReviewersChangedWatchEvent;
 
 export interface ClientWatchState {
   isWatchEnabled: boolean;
