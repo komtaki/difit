@@ -5,6 +5,7 @@ import type {
   DiffLineRange,
   DiffCommentCodeSnapshot,
   DiffCommentMessage,
+  FindingMeta,
   FindingSeverity,
   ReplyCommentImport,
   ThreadCommentImport,
@@ -19,6 +20,8 @@ interface MergeCommentImportsResult {
 
 type ReviewImportFields = Pick<ThreadCommentImport, 'kind' | 'reviewer' | 'severity' | 'title'>;
 type ThreadReviewMeta = Pick<DiffCommentThread, 'kind' | 'finding'>;
+type FindingHistory = Pick<FindingMeta, 'fingerprint' | 'decision' | 'previousDecision'>;
+type FindingHistoryResolver = (commentImport: ThreadCommentImport) => FindingHistory | undefined;
 
 const FINDING_FIELD_NAMES = ['reviewer', 'severity', 'title'] as const;
 const REVIEW_FIELD_NAMES = ['kind', ...FINDING_FIELD_NAMES] as const;
@@ -308,7 +311,10 @@ function sortByNewestThread(left: DiffCommentThread, right: DiffCommentThread): 
   return right.updatedAt.localeCompare(left.updatedAt);
 }
 
-function createThreadReviewMeta(commentImport: ThreadCommentImport): ThreadReviewMeta {
+function createThreadReviewMeta(
+  commentImport: ThreadCommentImport,
+  resolveFindingHistory: FindingHistoryResolver | undefined,
+): ThreadReviewMeta {
   const { kind, reviewer, severity, title } = commentImport;
   if (!kind) {
     return {};
@@ -317,10 +323,17 @@ function createThreadReviewMeta(commentImport: ThreadCommentImport): ThreadRevie
     return { kind };
   }
 
-  return { kind, finding: { reviewer, severity, title } };
+  return {
+    kind,
+    finding: { reviewer, severity, title, ...resolveFindingHistory?.(commentImport) },
+  };
 }
 
-function createImportedThread(commentImport: ThreadCommentImport, now: string): DiffCommentThread {
+function createImportedThread(
+  commentImport: ThreadCommentImport,
+  now: string,
+  resolveFindingHistory: FindingHistoryResolver | undefined,
+): DiffCommentThread {
   const { createdAt, updatedAt } = toThreadTimestamp(commentImport, now);
   const threadId = commentImport.id ?? createId();
 
@@ -340,7 +353,7 @@ function createImportedThread(commentImport: ThreadCommentImport, now: string): 
         updatedAt,
       },
     ],
-    ...createThreadReviewMeta(commentImport),
+    ...createThreadReviewMeta(commentImport, resolveFindingHistory),
   };
 }
 
@@ -569,6 +582,7 @@ export function serializeCommentImports(commentImports: CommentImport[]): string
 export function mergeCommentImports(
   existingThreads: DiffCommentThread[],
   commentImports: CommentImport[],
+  resolveFindingHistory?: FindingHistoryResolver,
 ): MergeCommentImportsResult {
   // Clone (don't shallow-copy) so appending a reply doesn't mutate the caller's
   // thread objects in place — otherwise the server can't detect the change and
@@ -585,7 +599,7 @@ export function mergeCommentImports(
         continue;
       }
 
-      threads.push(createImportedThread(commentImport, now));
+      threads.push(createImportedThread(commentImport, now, resolveFindingHistory));
       continue;
     }
 

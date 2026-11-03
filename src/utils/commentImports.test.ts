@@ -419,6 +419,39 @@ describe('commentImports', () => {
       expect(result.threads[0]?.finding?.decision).toBe('adopted');
     });
 
+    it('adds resolved finding history only to newly imported findings', () => {
+      const resolveFindingHistory = vi.fn(() => ({
+        fingerprint: 'fp-1',
+        decision: 'rejected' as const,
+        previousDecision: 'rejected' as const,
+      }));
+
+      const result = mergeCommentImports(
+        [],
+        normalizeCommentImports([
+          findingImport,
+          {
+            type: 'thread',
+            filePath: 'src/plain.ts',
+            position: { side: 'new', line: 1 },
+            body: 'x',
+          },
+        ]),
+        resolveFindingHistory,
+      );
+
+      expect(resolveFindingHistory).toHaveBeenCalledTimes(1);
+      expect(result.threads[0]?.finding).toEqual({
+        reviewer: 'correctness',
+        severity: 'warn',
+        title: 'T',
+        fingerprint: 'fp-1',
+        decision: 'rejected',
+        previousDecision: 'rejected',
+      });
+      expect(result.threads[1]).not.toHaveProperty('finding');
+    });
+
     it('warns and skips reply import when no matching thread exists', () => {
       const result = mergeCommentImports(
         [],

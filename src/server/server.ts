@@ -26,6 +26,11 @@ import {
 import { getFileExtension } from '../utils/fileUtils.js';
 import { selectThreadsForOutput } from '../utils/reviewOutput.js';
 
+import {
+  computeFindingFingerprint,
+  createDecisionStore,
+  syncFindingDecisions,
+} from './decision-store.js';
 import { FileWatcherService } from './file-watcher.js';
 import { GitDiffParser } from './git-diff.js';
 import { createReviewContext } from './review-context.js';
@@ -37,10 +42,13 @@ import {
   type Comment,
   type CommentThread,
   type DiffCommentThread,
+  type DiffLineRange,
   type DiffResponse,
   type DiffSelection,
+  type FindingMeta,
   type GeneratedStatusResponse,
   type RevisionsResponse,
+  type ThreadCommentImport,
 } from '@/types/diff.js';
 import { type ReviewerStatus } from '@/types/review.js';
 import {
@@ -123,6 +131,12 @@ function createResolvedCommentSelection(
 
 function createCommentSessionKey(selection: DiffSelection): string {
   return getDiffSelectionKey(selection);
+}
+
+function selectLines(content: string, line: DiffLineRange): string {
+  const lines = content.split('\n');
+  const { start, end } = typeof line === 'number' ? { start: line, end: line } : line;
+  return lines.slice(start - 1, end).join('\n');
 }
 
 function parseJsonBody(body: unknown): unknown {
@@ -283,8 +297,64 @@ export async function startServer(
     reviewContext.setOverview(options.overview);
   }
 
+  const decisionStore = options.stdinDiff
+    ? null
+    : await createDecisionStore({ repoPath: repositoryPath });
+
+  async function readFindingLineContent(
+    commentImport: ThreadCommentImport,
+    targetRef: string,
+  ): Promise<string> {
+    if (commentImport.codeSnapshot) {
+      return commentImport.codeSnapshot.content;
+    }
+    try {
+      const content = await parser.getBlobContent(commentImport.filePath, targetRef);
+      return selectLines(content.toString('utf8'), commentImport.position.line);
+    } catch {
+      return '';
+    }
+  }
+
+  async function resolveFindingHistories(commentImports: CommentImport[], targetRef: string) {
+    const findingHistories = new Map<
+      CommentImport,
+      Pick<FindingMeta, 'fingerprint' | 'decision' | 'previousDecision'>
+    >();
+
+    for (const commentImport of commentImports) {
+      const { reviewer, title } = commentImport;
+      if (!decisionStore || commentImport.type !== 'thread' || commentImport.kind !== 'finding') {
+        continue;
+      }
+      if (!reviewer || !title) {
+        continue;
+      }
+
+      const fingerprint = computeFindingFingerprint({
+        id: commentImport.id,
+        reviewer,
+        filePath: commentImport.filePath,
+        title,
+        lineContent: commentImport.id ? '' : await readFindingLineContent(commentImport, targetRef),
+      });
+      const previousDecision = decisionStore.get(fingerprint)?.decision;
+      findingHistories.set(commentImport, {
+        fingerprint,
+        ...(previousDecision ? { previousDecision } : {}),
+        ...(previousDecision === 'rejected' ? { decision: previousDecision } : {}),
+      });
+    }
+
+    return (commentImport: CommentImport) => findingHistories.get(commentImport);
+  }
+
   const commentSessions = new Map<string, CommentSessionState>();
-  const initialCommentThreads = mergeCommentImports([], initialCommentImports).threads;
+  const initialCommentThreads = mergeCommentImports(
+    [],
+    initialCommentImports,
+    await resolveFindingHistories(initialCommentImports, initialSelection.targetCommitish),
+  ).threads;
   if (initialCommentThreads.length > 0) {
     commentSessions.set(createCommentSessionKey(currentCommentSelection), {
       threads: initialCommentThreads,
@@ -768,7 +838,21 @@ export async function startServer(
     return true;
   }
 
-  app.post('/api/comments', (req, res) => {
+  async function persistFindingDecisions(
+    previousThreads: DiffCommentThread[],
+    nextThreads: DiffCommentThread[],
+  ) {
+    if (!decisionStore) {
+      return;
+    }
+    try {
+      await syncFindingDecisions(decisionStore, previousThreads, nextThreads);
+    } catch (error) {
+      console.warn('Failed to save finding decisions:', error);
+    }
+  }
+
+  app.post('/api/comments', async (req, res) => {
     try {
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
       const body: unknown =
@@ -783,8 +867,10 @@ export async function startServer(
       const resolvedThreads = isStale
         ? mergeCommentThreads(session.threads, nextThreads).threads
         : nextThreads;
+      const previousThreads = session.threads;
 
       updateCommentSession(selection, resolvedThreads);
+      await persistFindingDecisions(previousThreads, resolvedThreads);
 
       res.json({
         success: true,
@@ -798,15 +884,19 @@ export async function startServer(
     }
   });
 
-  app.post('/api/comment-imports', (req, res) => {
+  app.post('/api/comment-imports', async (req, res) => {
     try {
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
-      const session = getOrCreateCommentSession(selection);
       const commentImports = parseCommentImportsPayload(req.body);
       const importId = createHash('sha256')
         .update(serializeCommentImports(commentImports))
         .digest('hex');
-      const merged = mergeCommentImports(session.threads, commentImports);
+      const resolveFindingHistory = await resolveFindingHistories(
+        commentImports,
+        selection.targetCommitish,
+      );
+      const session = getOrCreateCommentSession(selection);
+      const merged = mergeCommentImports(session.threads, commentImports, resolveFindingHistory);
       const changed = updateCommentSession(selection, merged.threads);
 
       res.json({

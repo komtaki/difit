@@ -20,6 +20,7 @@ import {
   readStdin,
 } from './utils.js';
 import { createCommentCommand } from './comment.js';
+import { createDecisionsCommand } from './decision-commands.js';
 import {
   createOverviewCommand,
   createReviewerCommand,
@@ -108,6 +109,7 @@ program
   .addCommand(createCommentCommand())
   .addCommand(createOverviewCommand())
   .addCommand(createReviewerCommand())
+  .addCommand(createDecisionsCommand())
   .argument(
     '[commit-ish]',
     'Git commit, tag, branch, HEAD~n reference, or "working"/"staged"/"."',

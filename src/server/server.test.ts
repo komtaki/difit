@@ -99,6 +99,19 @@ vi.mock('./git-diff.js', () => {
   return { GitDiffParser: GitDiffParserMock };
 });
 
+// Only temporary repositories get a real decision store, so tests never write into this checkout's .git.
+vi.mock('./decision-store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./decision-store.js')>();
+  const { tmpdir: getTmpdir } = await import('os');
+  return {
+    ...actual,
+    createDecisionStore: (options: Parameters<typeof actual.createDecisionStore>[0]) =>
+      options.repoPath.startsWith(getTmpdir())
+        ? actual.createDecisionStore(options)
+        : Promise.resolve(null),
+  };
+});
+
 describe('Server Integration Tests', () => {
   describe('Comments API', () => {
     it('should accept properly formatted comments', async () => {
@@ -1902,6 +1915,125 @@ describe('Server Integration Tests', () => {
 
       // Without keepAlive, process.exit SHOULD have been called
       expect(process.exit).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('Finding decisions', () => {
+    let repoPath: string;
+
+    const findingImport = (line: number) => ({
+      type: 'thread',
+      kind: 'finding',
+      reviewer: 'correctness',
+      severity: 'warn',
+      title: 'Possible null dereference',
+      filePath: 'src/finding.ts',
+      position: { side: 'new', line },
+      body: 'value may be null here',
+      author: 'AI',
+    });
+
+    async function startRound(preferredPort: number, fileContent: string) {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort,
+        repoPath,
+      });
+      servers.push(result.server);
+      parserInstances.at(-1).getBlobContent.mockResolvedValue(Buffer.from(fileContent));
+      return result.port;
+    }
+
+    async function importFindings(port: number, imports: unknown[]) {
+      await fetch(`http://localhost:${port}/api/comment-imports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(imports),
+      });
+      const response = await fetch(`http://localhost:${port}/api/comments-json`);
+      return (await response.json()) as any;
+    }
+
+    async function decide(port: number, session: any, decisions: Record<string, string>) {
+      await fetch(`http://localhost:${port}/api/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseVersion: session.version,
+          threads: session.threads.map((thread: any) => ({
+            ...thread,
+            finding: { ...thread.finding, decision: decisions[thread.finding.title] },
+          })),
+        }),
+      });
+    }
+
+    beforeEach(async () => {
+      const { execFileSync } = await import('child_process');
+      repoPath = await fs.mkdtemp(join(tmpdir(), 'difit-server-decisions-'));
+      execFileSync('git', ['init', '--quiet', '-b', 'main'], { cwd: repoPath });
+    });
+
+    afterEach(async () => {
+      await fs.rm(repoPath, { recursive: true, force: true });
+    });
+
+    it('carries decisions over to the next round even when line numbers shift', async () => {
+      const firstPort = await startRound(9100, 'a\nb\nreturn value.name;\n');
+      const firstSession = await importFindings(firstPort, [
+        findingImport(3),
+        { ...findingImport(1), id: 'adopt-me', title: 'Adopted finding' },
+      ]);
+      expect(firstSession.threads[0].finding.fingerprint).toEqual(expect.any(String));
+      expect(firstSession.threads[0].finding).not.toHaveProperty('previousDecision');
+
+      await decide(firstPort, firstSession, {
+        'Possible null dereference': 'rejected',
+        'Adopted finding': 'adopted',
+      });
+
+      const secondPort = await startRound(9105, 'x\na\nb\n    return value.name;\n');
+      const secondSession = await importFindings(secondPort, [
+        findingImport(4),
+        { ...findingImport(9), id: 'adopt-me', title: 'Adopted finding' },
+      ]);
+
+      const [rejected, adopted] = secondSession.threads;
+      expect(rejected.finding).toMatchObject({
+        decision: 'rejected',
+        previousDecision: 'rejected',
+      });
+      expect(adopted.finding.previousDecision).toBe('adopted');
+      expect(adopted.finding).not.toHaveProperty('decision');
+    });
+
+    it('forgets a decision once it is withdrawn', async () => {
+      const port = await startRound(9110, 'a\nb\nreturn value.name;\n');
+      const session = await importFindings(port, [findingImport(3)]);
+      await decide(port, session, { 'Possible null dereference': 'rejected' });
+      const decided = (await (
+        await fetch(`http://localhost:${port}/api/comments-json`)
+      ).json()) as any;
+      await decide(port, decided, {});
+
+      const nextPort = await startRound(9115, 'a\nb\nreturn value.name;\n');
+      const nextSession = await importFindings(nextPort, [findingImport(3)]);
+
+      expect(nextSession.threads[0].finding).not.toHaveProperty('previousDecision');
+      expect(nextSession.threads[0].finding).not.toHaveProperty('decision');
+    });
+
+    it('does not track decisions for stdin diffs', async () => {
+      const result = await startServer({
+        stdinDiff: 'diff --git a/a b/a',
+        preferredPort: 9120,
+        repoPath,
+      });
+      servers.push(result.server);
+
+      const session = await importFindings(result.port, [findingImport(3)]);
+
+      expect(session.threads[0].finding).not.toHaveProperty('fingerprint');
     });
   });
 
