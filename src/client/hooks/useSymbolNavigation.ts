@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { LspLocation, LspPositionRequest, LspStatusResponse } from '../../types/lsp';
+import { fetchJson, isRecord } from '../utils/fetchJson';
 
 export interface SymbolLookup {
   symbol: string;
@@ -31,21 +32,12 @@ const firstViewableLocation = (locations: LspLocation[]) => {
   return location ? toView(location) : null;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
 const isStatusResponse = (value: unknown): value is LspStatusResponse =>
   isRecord(value) && typeof value.enabled === 'boolean' && Array.isArray(value.servers);
 
 async function fetchStatus(): Promise<LspStatusResponse | null> {
-  try {
-    const response = await fetch('/api/lsp/status');
-    if (!response.ok) return null;
-    const payload: unknown = await response.json();
-    return isStatusResponse(payload) ? payload : null;
-  } catch {
-    return null;
-  }
+  const payload = await fetchJson('/api/lsp/status');
+  return isStatusResponse(payload) ? payload : null;
 }
 
 async function fetchLocations(

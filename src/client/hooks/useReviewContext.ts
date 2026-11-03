@@ -1,27 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { ReviewerState } from '../../types/review';
+import { fetchJson, isRecord } from '../utils/fetchJson';
 
 import type { ReviewContextEventType } from './useFileWatch';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 const isReviewerState = (value: unknown): value is ReviewerState =>
   isRecord(value) &&
   typeof value.name === 'string' &&
   (value.status === 'running' || value.status === 'done') &&
   typeof value.updatedAt === 'string';
-
-async function fetchJson(url: string): Promise<unknown> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
-}
 
 async function fetchOverview(): Promise<string | null> {
   const payload = await fetchJson('/api/overview');

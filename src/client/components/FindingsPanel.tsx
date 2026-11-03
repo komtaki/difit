@@ -35,8 +35,7 @@ export function FindingsPanel({ threads, onNavigate, onSetFindingDecision }: Fin
           </h2>
           <ul className="divide-y divide-github-border rounded-md border border-[var(--color-finding-border)] bg-github-bg-secondary">
             {group.threads.map((thread) => {
-              const finding = thread.finding;
-              if (!finding) return null;
+              const { finding } = thread;
               return (
                 <li
                   key={thread.id}
