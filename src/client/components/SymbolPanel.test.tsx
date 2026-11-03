@@ -122,6 +122,43 @@ describe('SymbolPanel', () => {
     await waitForRows(1);
   });
 
+  it('wraps long file lines instead of hiding them beyond the panel width', async () => {
+    const longLine = `export const value = ${'veryLongIdentifier + '.repeat(20)}1;`;
+    respondWithFile(`// first\n${longLine}`);
+    renderPanel({ view: { filePath: 'src/b.ts', line: 2 } });
+
+    await waitForRows(2);
+    const target = fileRows()[1]!;
+    expect(target).toHaveAttribute('data-target-line', 'true');
+    expect(target).toHaveClass('items-start');
+    const [lineNumber, code] = Array.from(target.children);
+    expect(lineNumber).toHaveTextContent('2');
+    expect(code).toHaveTextContent(longLine);
+    expect(code).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(code).not.toHaveClass('whitespace-pre');
+    expect(fileRegion().firstElementChild).toHaveClass('overflow-x-hidden');
+  });
+
+  it('shows the code of each entry in full without truncating it', () => {
+    respondWithFile('');
+    const longLine = `const value = ${'someFunctionCall(argument) + '.repeat(10)}1;`;
+    renderPanel({
+      current: {
+        ...lookup,
+        symbol: 'aVeryLongSymbolNameThatMustNotBeEllipsized',
+        definition: [location({ preview: ['', longLine, ''] })],
+      },
+    });
+
+    const definition = screen.getByRole('region', { name: 'Definition' });
+    const code = within(definition).getByText(longLine);
+    expect(code).not.toHaveClass('truncate');
+    expect(code).toHaveClass('whitespace-pre-wrap', 'break-words');
+    const symbol = screen.getByText('aVeryLongSymbolNameThatMustNotBeEllipsized');
+    expect(symbol).not.toHaveClass('truncate');
+    expect(symbol).toHaveClass('break-all');
+  });
+
   it('shows loading and file errors', async () => {
     fetchMock.mockResolvedValue({ ok: false, json: async () => ({ error: 'File not found' }) });
     renderPanel();
