@@ -10,6 +10,8 @@ import {
 
 const STDERR_LIMIT = 2000;
 const SHUTDOWN_TIMEOUT_MS = 2000;
+const REQUEST_RESERVE_MS = 2000;
+const SELF_LOCATION_RETRY_DELAYS_MS = [250, 500, 1000];
 
 interface LspPosition {
   line: number;
@@ -62,18 +64,53 @@ function withTimeout<T>(promise: Promise<T>, method: string, timeoutMs: number):
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function toRawLocations(result: DefinitionResult): LspRawLocation[] {
+interface LspRangeLocation {
+  uri: string;
+  range: LspRange;
+}
+
+function toRangeLocations(result: DefinitionResult): LspRangeLocation[] {
   if (!result) {
     return [];
   }
 
   return (Array.isArray(result) ? result : [result]).map((location) => {
     if ('targetUri' in location) {
-      const range = location.targetSelectionRange ?? location.targetRange;
-      return { uri: location.targetUri, ...range.start };
+      return {
+        uri: location.targetUri,
+        range: location.targetSelectionRange ?? location.targetRange,
+      };
     }
-    return { uri: location.uri, ...location.range.start };
+    return location;
   });
+}
+
+function toRawLocations(locations: LspRangeLocation[]): LspRawLocation[] {
+  return locations.map(({ uri, range }) => ({ uri, ...range.start }));
+}
+
+function isBefore(a: LspPosition, b: LspPosition): boolean {
+  return a.line < b.line || (a.line === b.line && a.character < b.character);
+}
+
+function isOnlyRequestPosition(
+  locations: LspRangeLocation[],
+  uri: string,
+  position: LspPosition,
+): boolean {
+  return (
+    locations.length > 0 &&
+    locations.every(
+      (location) =>
+        location.uri === uri &&
+        !isBefore(position, location.range.start) &&
+        !isBefore(location.range.end, position),
+    )
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function describeFailure(message: string, stderr: string): string {
@@ -127,9 +164,46 @@ export async function startLspClient(options: {
     (params.items ?? []).map(() => null),
   );
   connection.onRequest('client/registerCapability', () => null);
-  connection.onRequest('window/workDoneProgress/create', () => null);
+  const activeProgressTokens = new Set<string | number>();
+  const idleWaiters = new Set<() => void>();
+  const settleProgress = (token: string | number) => {
+    activeProgressTokens.delete(token);
+    if (activeProgressTokens.size > 0) {
+      return;
+    }
+    for (const resolveIdle of idleWaiters) {
+      resolveIdle();
+    }
+    idleWaiters.clear();
+  };
+  connection.onRequest('window/workDoneProgress/create', (params: { token: string | number }) => {
+    activeProgressTokens.add(params.token);
+    return null;
+  });
+  connection.onUnhandledProgress(({ token, value }) => {
+    const kind = (value as { kind?: string } | null)?.kind;
+    if (kind === 'begin') {
+      activeProgressTokens.add(token);
+    } else if (kind === 'end') {
+      settleProgress(token);
+    }
+  });
   connection.onError(() => {});
   connection.listen();
+
+  const requestReserveMs = Math.min(REQUEST_RESERVE_MS, options.timeoutMs / 2);
+  const waitForIdleProgress = async (budgetMs: number) => {
+    if (activeProgressTokens.size === 0 || budgetMs <= 0) {
+      return;
+    }
+    let resolveIdle = () => {};
+    const idle = new Promise<void>((resolve) => {
+      resolveIdle = resolve;
+      idleWaiters.add(resolve);
+    });
+    await Promise.race([idle, delay(budgetMs), exited]);
+    idleWaiters.delete(resolveIdle);
+  };
 
   const request = async <T>(method: string, params: unknown, timeoutMs = options.timeoutMs) => {
     const response = connection.sendRequest<T>(method, params);
@@ -157,6 +231,7 @@ export async function startLspClient(options: {
           references: {},
         },
         workspace: { configuration: true, workspaceFolders: true },
+        window: { workDoneProgress: true },
       },
     });
     await connection.sendNotification('initialized', {});
@@ -191,24 +266,57 @@ export async function startLspClient(options: {
     return uri;
   };
 
+  const requestWhenIdle = async (
+    method: string,
+    params: unknown,
+    deadline: number,
+  ): Promise<LspRangeLocation[]> => {
+    await waitForIdleProgress(deadline - Date.now() - requestReserveMs);
+    return toRangeLocations(
+      await request<DefinitionResult>(method, params, Math.max(1, deadline - Date.now())),
+    );
+  };
+
+  let hasResolvedDefinitionElsewhere = false;
+
   return {
     async definition(document, position) {
+      const deadline = Date.now() + options.timeoutMs;
       const uri = await syncDocument(document);
-      return toRawLocations(
-        await request<DefinitionResult>('textDocument/definition', {
-          textDocument: { uri },
-          position,
-        }),
-      );
+      const params = { textDocument: { uri }, position };
+      let locations = await requestWhenIdle('textDocument/definition', params, deadline);
+      for (const retryDelayMs of SELF_LOCATION_RETRY_DELAYS_MS) {
+        if (
+          hasResolvedDefinitionElsewhere ||
+          !isOnlyRequestPosition(locations, uri, position) ||
+          Date.now() + retryDelayMs + requestReserveMs > deadline
+        ) {
+          break;
+        }
+        await delay(retryDelayMs);
+        try {
+          locations = await requestWhenIdle('textDocument/definition', params, deadline);
+        } catch (error) {
+          if (error instanceof LspRequestTimeoutError) {
+            break;
+          }
+          throw error;
+        }
+      }
+      if (locations.length > 0 && !isOnlyRequestPosition(locations, uri, position)) {
+        hasResolvedDefinitionElsewhere = true;
+      }
+      return toRawLocations(locations);
     },
     async references(document, position) {
+      const deadline = Date.now() + options.timeoutMs;
       const uri = await syncDocument(document);
       return toRawLocations(
-        await request<DefinitionResult>('textDocument/references', {
-          textDocument: { uri },
-          position,
-          context: { includeDeclaration: true },
-        }),
+        await requestWhenIdle(
+          'textDocument/references',
+          { textDocument: { uri }, position, context: { includeDeclaration: true } },
+          deadline,
+        ),
       );
     },
     onExit(listener) {

@@ -49,6 +49,8 @@ describe('startLspClient', () => {
     client?.kill();
     client = undefined;
     delete process.env.FAKE_LSP_LOG;
+    delete process.env.FAKE_LSP_SELF_ANSWERS;
+    delete process.env.FAKE_LSP_LOADING_MS;
     if (originalMode === undefined) {
       delete process.env.FAKE_LSP_MODE;
     } else {
@@ -97,6 +99,64 @@ describe('startLspClient', () => {
       (entry) => entry.method === 'textDocument/references',
     );
     expect(references?.params.context).toEqual({ includeDeclaration: true });
+  });
+
+  const selfLocation = (line: number, character: number) => ({
+    uri: pathToFileURL(document().absolutePath).href,
+    line,
+    character,
+  });
+  const realLocation = () => selfLocation(1, 9);
+  const definitionRequestCount = async () =>
+    (await readLog()).filter((entry) => entry.method === 'textDocument/definition').length;
+
+  it('advertises work done progress support', async () => {
+    client = await start();
+
+    const [initialize] = await readLog();
+    expect(initialize!.params.capabilities.window).toEqual({ workDoneProgress: true });
+  });
+
+  it('waits for project loading progress to end before asking for a definition', async () => {
+    process.env.FAKE_LSP_MODE = 'progress';
+    process.env.FAKE_LSP_LOADING_MS = '400';
+    client = await start();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const locations = await client.definition(document(), { line: 3, character: 4 });
+
+    expect(locations).toEqual([realLocation()]);
+    expect(await definitionRequestCount()).toBe(1);
+  });
+
+  it('retries while the server only answers with the request position', async () => {
+    process.env.FAKE_LSP_SELF_ANSWERS = '2';
+    client = await start();
+
+    const locations = await client.definition(document(), { line: 3, character: 4 });
+
+    expect(locations).toEqual([realLocation()]);
+    expect(await definitionRequestCount()).toBe(3);
+  });
+
+  it('returns the request position after the retries run out', async () => {
+    process.env.FAKE_LSP_SELF_ANSWERS = '100';
+    client = await start(5000);
+
+    const locations = await client.definition(document(), { line: 3, character: 4 });
+
+    expect(locations).toEqual([selfLocation(3, 4)]);
+    expect(await definitionRequestCount()).toBe(4);
+  });
+
+  it('stops retrying once a definition resolved elsewhere', async () => {
+    client = await start();
+    await client.definition(document(), { line: 3, character: 4 });
+
+    const locations = await client.definition(document(), { line: 1, character: 17 });
+
+    expect(locations).toEqual([realLocation()]);
+    expect(await definitionRequestCount()).toBe(2);
   });
 
   it('times out a request the server never answers', async () => {

@@ -2,6 +2,9 @@ import { appendFileSync } from 'node:fs';
 
 const mode = process.env.FAKE_LSP_MODE ?? 'normal';
 const logPath = process.env.FAKE_LSP_LOG;
+const loadingMs = Number(process.env.FAKE_LSP_LOADING_MS ?? 300);
+let selfAnswersLeft = Number(process.env.FAKE_LSP_SELF_ANSWERS ?? 0);
+let isLoading = false;
 
 process.stderr.write('fake language server booting\n');
 
@@ -28,6 +31,23 @@ function location(uri, line, character) {
   };
 }
 
+function startProjectLoading() {
+  isLoading = true;
+  send({
+    id: 'progress-create',
+    method: 'window/workDoneProgress/create',
+    params: { token: 'load' },
+  });
+  send({
+    method: '$/progress',
+    params: { token: 'load', value: { kind: 'begin', title: 'Loading' } },
+  });
+  setTimeout(() => {
+    isLoading = false;
+    send({ method: '$/progress', params: { token: 'load', value: { kind: 'end' } } });
+  }, loadingMs);
+}
+
 function handleRequest({ id, method, params }) {
   switch (method) {
     case 'initialize':
@@ -38,6 +58,16 @@ function handleRequest({ id, method, params }) {
       return;
     case 'textDocument/definition':
       if (mode === 'hang') {
+        return;
+      }
+      if (isLoading || selfAnswersLeft > 0) {
+        selfAnswersLeft -= 1;
+        send({
+          id,
+          result: [
+            location(params.textDocument.uri, params.position.line, params.position.character),
+          ],
+        });
         return;
       }
       send({
@@ -93,6 +123,9 @@ process.stdin.on('data', (chunk) => {
     log({ method: message.method, params: message.params });
     if (message.method === 'exit') {
       process.exit(0);
+    }
+    if (message.method === 'initialized' && mode === 'progress') {
+      startProjectLoading();
     }
     if (message.id !== undefined && message.method) {
       handleRequest(message);
