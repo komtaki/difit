@@ -1,6 +1,7 @@
 import type { DiffFile } from '../../../types/diff';
 import { getCommentKey } from '../../utils/navigation/domHelpers';
 import { hasContentOnSide } from '../../utils/navigation/lineHelpers';
+import { findFirstChangePosition } from '../../utils/navigation/positionHelpers';
 
 import type { CommentNavigationItem, CursorPosition, ViewMode } from './types';
 
@@ -33,6 +34,10 @@ export function createNavigationFilters(
   viewMode: ViewMode,
   reviewedFiles?: Set<string>,
 ) {
+  const fileEntryPositions = files.map((file, fileIndex) =>
+    reviewedFiles?.has(file.path) ? null : findFirstChangePosition(file, fileIndex),
+  );
+
   return {
     /**
      * Line navigation - navigates to lines with content on the current side
@@ -91,10 +96,13 @@ export function createNavigationFilters(
     },
 
     /**
-     * File navigation - navigates to the first line of each file
+     * File navigation - navigates to the first change of each file, or to its
+     * first line when the file is reviewed or has no added/deleted lines
      */
     file: (pos: CursorPosition): boolean => {
-      return pos.chunkIndex === 0 && pos.lineIndex === 0;
+      const entry = fileEntryPositions[pos.fileIndex];
+      if (!entry) return pos.chunkIndex === 0 && pos.lineIndex === 0;
+      return pos.chunkIndex === entry.chunkIndex && pos.lineIndex === entry.lineIndex;
     },
   };
 }

@@ -75,3 +75,15 @@ export function findCommentPosition(
     findLinePosition(file, fileIndex, targetLineNumber, 'old')
   );
 }
+
+export function findFirstChangePosition(file: DiffFile, fileIndex: number): CursorPosition | null {
+  for (let chunkIndex = 0; chunkIndex < file.chunks.length; chunkIndex++) {
+    const lines = file.chunks[chunkIndex]?.lines ?? [];
+    const lineIndex = lines.findIndex((line) => line.type === 'add' || line.type === 'delete');
+    const line = lines[lineIndex];
+    if (line) {
+      return { fileIndex, chunkIndex, lineIndex, side: line.type === 'delete' ? 'left' : 'right' };
+    }
+  }
+  return null;
+}
