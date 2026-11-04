@@ -21,6 +21,9 @@ What it adds:
 - **Reviewer progress**: `lensdiff reviewer start --port <port> <name>` and `lensdiff reviewer done --port <port> <name>`.
 - **Decisions carried to the next round**: Adopt/Reject decisions are saved per branch at `$(git rev-parse --git-common-dir)/lensdiff/decisions/<branch>.json` and applied in the next review round. Inspect or delete them with `lensdiff decisions get [--branch <name>]` and `lensdiff decisions clear [--branch <name>]`.
 - **Go to definition / references**: Cmd/Ctrl+click a symbol to look it up through `ruby-lsp`, `typescript-language-server`, or `pyright-langserver` found on PATH (for TypeScript, the repository's `node_modules/.bin` is preferred). Available only when the target is `HEAD`, `working`, or `.`. The right panel shows the whole file that contains the definition.
+
+  ![Symbol panel](docs/images/symbol-panel.png)
+
 - **Whole files**: `--context 100000` shows whole files without folding unchanged lines.
 
 Example finding:

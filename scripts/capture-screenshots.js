@@ -12,7 +12,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const cliPath = path.join(repoRoot, 'dist', 'cli', 'index.js');
 const imagesDir = path.join(repoRoot, 'docs', 'images');
 
-const DEMO_COMMIT = '61fae81c933b4fa6630be88c42e18b692fb1f836';
+const DEMO_COMMIT = '776f33920b22a52fdc3d02f26767e3cc4a2585d9';
+const DEMO_BASE = '82a765c037ec28fe7fe90ab2f1e4b5748032b4fa';
 const DEMO_FILE = 'src/server/decision-store.ts';
 const SYMBOL_LINE = 7;
 const SYMBOL_NAME = 'DiffCommentThread';
@@ -49,7 +50,7 @@ const REVIEW_COMMENTS = [
     type: 'thread',
     kind: 'explanation',
     filePath: DEMO_FILE,
-    position: { side: 'new', line: { start: 91, end: 97 } },
+    position: { side: 'new', line: { start: 105, end: 108 } },
     body: 'Decisions live under `--git-common-dir`, so every worktree of a clone shares them. One JSON file is kept per branch.',
   },
   {
@@ -59,14 +60,14 @@ const REVIEW_COMMENTS = [
     severity: 'warn',
     title: 'Detached HEAD silently disables decisions',
     filePath: DEMO_FILE,
-    position: { side: 'new', line: { start: 98, end: 101 } },
+    position: { side: 'new', line: { start: 108, end: 114 } },
     body: '`symbolic-ref` fails on a detached HEAD, the error is swallowed, and the store becomes `null`. Log a hint so users know why decisions are not carried over.',
   },
   {
     type: 'thread',
     kind: 'explanation',
     filePath: DEMO_FILE,
-    position: { side: 'new', line: { start: 121, end: 134 } },
+    position: { side: 'new', line: { start: 140, end: 155 } },
     body: 'Each write is chained on `pendingWrite` and goes through a temporary file plus `rename`, so a crash never leaves half-written JSON behind.',
   },
   {
@@ -76,7 +77,7 @@ const REVIEW_COMMENTS = [
     severity: 'info',
     title: 'Temporary file is left behind if rename fails',
     filePath: DEMO_FILE,
-    position: { side: 'new', line: { start: 128, end: 130 } },
+    position: { side: 'new', line: { start: 149, end: 151 } },
     body: 'Remove `temporaryPath` in a `catch` so a failed rename does not accumulate `.tmp` files in the decisions directory.',
   },
 ];
@@ -141,7 +142,7 @@ async function startServer({ demoRepo, workDir }) {
     [
       cliPath,
       'HEAD',
-      'HEAD^',
+      DEMO_BASE,
       '--no-open',
       '--keep-alive',
       '--clean',
@@ -200,9 +201,10 @@ async function openTab(page, name) {
 async function captureFilesChanged(page) {
   await openTab(page, 'Files changed');
   const file = page.locator(`[data-file-path="${DEMO_FILE}"]`);
+  await file.evaluate((element) => element.scrollIntoView({ block: 'start' }));
   await file.locator('[data-thread-kind="finding"]').first().waitFor();
   await file
-    .locator('[data-symbol-line="86"]')
+    .locator('[data-symbol-line="98"]')
     .first()
     .evaluate((line) => {
       line.scrollIntoView({ block: 'start' });
@@ -225,7 +227,7 @@ async function captureSymbolPanel(page) {
     .locator(`[data-file-path="${DEMO_FILE}"] [data-symbol-line="${SYMBOL_LINE}"]`)
     .first();
   await line.evaluate((element) => element.scrollIntoView({ block: 'center' }));
-  const box = await line.evaluate((element, symbol) => {
+  const position = await line.evaluate((element, symbol) => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const index = node.textContent.indexOf(symbol);
@@ -233,20 +235,25 @@ async function captureSymbolPanel(page) {
       const range = document.createRange();
       range.setStart(node, index);
       range.setEnd(node, index + symbol.length);
-      const rect = range.getBoundingClientRect();
-      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      const symbolRect = range.getBoundingClientRect();
+      const lineRect = element.getBoundingClientRect();
+      return {
+        x: symbolRect.x + symbolRect.width / 2 - lineRect.x,
+        y: symbolRect.y + symbolRect.height / 2 - lineRect.y,
+      };
     }
     return null;
   }, SYMBOL_NAME);
-  if (!box) {
+  if (!position) {
     throw new Error(`${SYMBOL_NAME} was not found on line ${SYMBOL_LINE} of ${DEMO_FILE}`);
   }
 
-  await page.keyboard.down('Control');
-  await page.mouse.click(box.x, box.y);
-  await page.keyboard.up('Control');
-  await page.getByRole('button', { name: 'Close symbol panel' }).waitFor({ timeout: 60_000 });
-  await page.waitForTimeout(1500);
+  await line.click({ position, modifiers: ['ControlOrMeta'] });
+  const fileView = page.getByRole('region', { name: 'File content' });
+  const targetLine = fileView.locator('[data-target-line="true"]');
+  await targetLine.waitFor({ timeout: 60_000 });
+  await targetLine.hover();
+  await page.waitForTimeout(1000);
   await page.screenshot({ path: path.join(imagesDir, 'symbol-panel.png') });
 }
 
