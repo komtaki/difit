@@ -1,6 +1,6 @@
 {
   "name": "lensdiff",
-  "version": "5.0.12",
+  "version": "5.0.12-lensdiff.1",
   "description": "AI と一緒にレビューするための difit の fork。概要タブ、行ごとのコード説明、採用/却下できる AI レビュー指摘（判断は次の周に引き継ぐ）、言語サーバーによる宣言ジャンプを追加",
   "keywords": [
     "cli",
