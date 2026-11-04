@@ -36,15 +36,32 @@ lensdiff comment add --port 4966 '{"type":"thread","kind":"finding","reviewer":"
 
 ### インストール
 
-lensdiff は npm に公開していません。clone してビルドします。
+lensdiff は npm レジストリには公開していません。GitHub Release に添付したビルド済みの tarball からインストールします。更新するときも同じコマンドを実行します。
+
+```bash
+npm install -g https://github.com/komtaki/lensdiff/releases/latest/download/lensdiff.tgz
+```
+
+特定のバージョンを入れるときは、タグ `v<version>` の URL を指定します。
+
+```bash
+npm install -g https://github.com/komtaki/lensdiff/releases/download/v2026.11.4/lensdiff.tgz
+```
+
+npm 11 はインストール時に `@parcel/watcher` の install script を実行せず警告を出します。このスクリプトはソースからビルドする指定があるときだけ動くもので、ビルド済みのネイティブバイナリは optionalDependencies で入るため、ファイル変更時の自動リロードはそのまま動きます。
+
+#### リリース手順
+
+`main` にマージするたびに、`lensdiff.tgz` を添付した GitHub Release が自動で作成されます（`.github/workflows/release.yml`）。バージョンは UTC の日付によるカレンダーバージョニングで、タグは `vYYYY.M.D`（例: `v2026.11.4`）です。同じ日の 2 回目以降のリリースには `v2026.11.4-2` のように `-n` を付けます。この仕組みを動かすには、リポジトリで GitHub Actions を一度有効にする必要があります。
+
+#### ソースから動かす（開発用）
 
 ```bash
 git clone https://github.com/komtaki/lensdiff.git
 cd lensdiff
 pnpm install
 pnpm build
-pnpm link --global  # lensdiff コマンドが使えるようになる
-# または直接実行: node dist/cli/index.js
+node dist/cli/index.js
 ```
 
 以降は upstream のドキュメントです。`difit` は `lensdiff` と読み替えてください。
