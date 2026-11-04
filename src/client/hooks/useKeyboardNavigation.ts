@@ -5,6 +5,7 @@ import { DEFAULT_DIFF_VIEW_MODE } from '../../utils/diffMode';
 import { NAVIGATION_SELECTORS } from '../constants/navigation';
 import { getElementId, getCommentKey } from '../utils/navigation/domHelpers';
 import { fixSide, hasContentOnSide } from '../utils/navigation/lineHelpers';
+import { findFirstChangePosition } from '../utils/navigation/positionHelpers';
 
 import {
   type CursorPosition,
@@ -345,64 +346,41 @@ export function useKeyboardNavigation({
     navigateToFile,
   ]);
 
-  // Jump to first/last file
-  useHotkeys(
-    '{',
-    () => {
-      if (files.length > 0) {
-        setCursor({
-          fileIndex: 0,
-          chunkIndex: 0,
-          lineIndex: 0,
-          side: viewMode === 'split' ? 'left' : 'right',
-        });
-        scrollToElement(
-          getElementId(
-            {
-              fileIndex: 0,
-              chunkIndex: 0,
-              lineIndex: 0,
-              side: viewMode === 'split' ? 'left' : 'right',
-            },
-            viewMode,
-          ),
-        );
-      }
+  const getFileEntryPosition = useCallback(
+    (fileIndex: number): CursorPosition | null => {
+      const file = files[fileIndex];
+      if (!file || !file.chunks[0]?.lines[0]) return null;
+      const firstChange = reviewedFiles.has(file.path)
+        ? null
+        : findFirstChangePosition(file, fileIndex);
+      return (
+        firstChange ??
+        fixSide(
+          { fileIndex, chunkIndex: 0, lineIndex: 0, side: viewMode === 'split' ? 'left' : 'right' },
+          files,
+        )
+      );
     },
-    { ...hotkeyOptions, useKey: true },
-    [files, viewMode, scrollToElement],
+    [files, reviewedFiles, viewMode],
   );
 
-  useHotkeys(
-    '}',
-    () => {
-      if (files.length > 0) {
-        const lastFileIndex = files.length - 1;
-        const lastFile = files[lastFileIndex];
-        if (lastFile && lastFile.chunks.length > 0) {
-          setCursor({
-            fileIndex: lastFileIndex,
-            chunkIndex: 0,
-            lineIndex: 0,
-            side: viewMode === 'split' ? 'left' : 'right',
-          });
-          scrollToElement(
-            getElementId(
-              {
-                fileIndex: lastFileIndex,
-                chunkIndex: 0,
-                lineIndex: 0,
-                side: viewMode === 'split' ? 'left' : 'right',
-              },
-              viewMode,
-            ),
-          );
-        }
-      }
+  const focusFileEntry = useCallback(
+    (fileIndex: number) => {
+      const position = getFileEntryPosition(fileIndex);
+      if (!position) return false;
+      setCursor(position);
+      scrollToElement(getElementId(position, viewMode));
+      return true;
     },
-    { ...hotkeyOptions, useKey: true },
-    [files, viewMode, scrollToElement],
+    [getFileEntryPosition, scrollToElement, viewMode],
   );
+
+  // Jump to first/last file
+  useHotkeys('{', () => focusFileEntry(0), { ...hotkeyOptions, useKey: true }, [focusFileEntry]);
+  useHotkeys('}', () => focusFileEntry(files.length - 1), { ...hotkeyOptions, useKey: true }, [
+    files,
+    focusFileEntry,
+  ]);
 
   // Side switching (split mode only)
   useHotkeys(
@@ -426,24 +404,11 @@ export function useKeyboardNavigation({
       for (let offset = 1; offset < totalFiles; offset++) {
         const fileIndex = (afterIndex + offset) % totalFiles;
         const file = files[fileIndex];
-        if (!file || !file.chunks[0]?.lines[0]) continue;
-        if (reviewedFiles.has(file.path)) continue;
-
-        const position = fixSide(
-          {
-            fileIndex,
-            chunkIndex: 0,
-            lineIndex: 0,
-            side: viewMode === 'split' ? 'left' : 'right',
-          },
-          files,
-        );
-        setCursor(position);
-        scrollToElement(getElementId(position, viewMode));
-        return;
+        if (!file || reviewedFiles.has(file.path)) continue;
+        if (focusFileEntry(fileIndex)) return;
       }
     },
-    [files, reviewedFiles, viewMode, scrollToElement],
+    [files, focusFileEntry, reviewedFiles],
   );
 
   // Update only the remembered navigation position, without showing the

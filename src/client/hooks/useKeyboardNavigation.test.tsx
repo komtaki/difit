@@ -330,9 +330,79 @@ describe('useKeyboardNavigation', () => {
 
       await user.keyboard('[ShiftLeft>][BracketRight][/ShiftLeft]');
 
-      expect(result.current.cursor?.fileIndex).toBe(mockFiles.length - 1);
-      expect(result.current.cursor?.chunkIndex).toBe(0);
-      expect(result.current.cursor?.lineIndex).toBe(0);
+      expect(result.current.cursor).toEqual({
+        fileIndex: mockFiles.length - 1,
+        chunkIndex: 0,
+        lineIndex: 1,
+        side: 'right',
+      });
+    });
+
+    it('should land on the first changed line of the next file with ] key', async () => {
+      const user = userEvent.setup();
+      const { result } = renderHook(
+        () =>
+          useKeyboardNavigation({
+            files: mockFiles,
+            comments: [],
+            viewMode: 'unified',
+            onToggleReviewed: vi.fn(),
+            reviewedFiles: new Set<string>(),
+          }),
+        { wrapper },
+      );
+
+      act(() => {
+        result.current.setCursorPosition({
+          fileIndex: 0,
+          chunkIndex: 0,
+          lineIndex: 2,
+          side: 'right',
+        });
+      });
+
+      await user.keyboard('{\\]}');
+
+      expect(result.current.cursor).toEqual({
+        fileIndex: 1,
+        chunkIndex: 0,
+        lineIndex: 1,
+        side: 'right',
+      });
+      expect(mockGetElementById).toHaveBeenLastCalledWith('file-1-chunk-0-line-1');
+    });
+
+    it('should land on the first line of a reviewed file with ] key', async () => {
+      const user = userEvent.setup();
+      const { result } = renderHook(
+        () =>
+          useKeyboardNavigation({
+            files: mockFiles,
+            comments: [],
+            viewMode: 'unified',
+            onToggleReviewed: vi.fn(),
+            reviewedFiles: new Set<string>(['file2.js']),
+          }),
+        { wrapper },
+      );
+
+      act(() => {
+        result.current.setCursorPosition({
+          fileIndex: 0,
+          chunkIndex: 0,
+          lineIndex: 2,
+          side: 'right',
+        });
+      });
+
+      await user.keyboard('{\\]}');
+
+      expect(result.current.cursor).toEqual({
+        fileIndex: 1,
+        chunkIndex: 0,
+        lineIndex: 0,
+        side: 'right',
+      });
     });
   });
 

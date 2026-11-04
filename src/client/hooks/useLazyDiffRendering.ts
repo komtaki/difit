@@ -7,6 +7,7 @@ const INITIAL_RENDERED_FILE_COUNT = 8;
 const LAZY_RENDER_ROOT_MARGIN = '1200px 0px';
 const SIDEBAR_SCROLL_MAX_ATTEMPTS = 60;
 const SIDEBAR_SCROLL_CORRECTION_DELAY_MS = 180;
+const FIRST_CHANGE_CONTEXT_LINES = 3;
 
 interface UseLazyDiffRenderingOptions {
   diffData: DiffResponse | null;
@@ -19,7 +20,7 @@ interface UseLazyDiffRenderingReturn {
   ensureFileRendered: (filePath: string) => void;
   ensureFilesRenderedUpTo: (filePath: string) => void;
   registerLazyFileContainer: (filePath: string, node: HTMLDivElement | null) => void;
-  scrollFileIntoDiffContainer: (filePath: string) => void;
+  scrollFileIntoDiffContainer: (filePath: string, lineElementId?: string) => void;
   isFileScrolledPastContainerTop: (filePath: string) => boolean;
 }
 
@@ -192,7 +193,7 @@ export function useLazyDiffRendering({
   );
 
   const scrollFileIntoDiffContainer = useCallback(
-    (filePath: string) => {
+    (filePath: string, lineElementId?: string) => {
       ensureFilesRenderedUpTo(filePath);
 
       const targetIndex = diffData?.files.findIndex((file) => file.path === filePath) ?? -1;
@@ -213,16 +214,30 @@ export function useLazyDiffRendering({
         return true;
       };
 
-      const scrollToFile = () => {
+      let attempts = 0;
+
+      const scrollToTarget = () => {
         const scrollContainer = diffScrollContainerRef.current;
-        const target = document.getElementById(getFileElementId(filePath));
-        if (!scrollContainer || !target) {
+        const fileNode = document.getElementById(getFileElementId(filePath));
+        if (!scrollContainer || !fileNode) {
           return false;
         }
 
+        const lineNode = lineElementId ? document.getElementById(lineElementId) : null;
+        if (lineElementId && !lineNode && attempts < SIDEBAR_SCROLL_MAX_ATTEMPTS) {
+          return false;
+        }
+
+        const target = lineNode ?? fileNode;
+        const headerHeight =
+          fileNode.querySelector<HTMLElement>('[data-file-header="true"]')?.offsetHeight ?? 0;
+        const topInset = lineNode
+          ? headerHeight + lineNode.offsetHeight * FIRST_CHANGE_CONTEXT_LINES
+          : 0;
         const containerRect = scrollContainer.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
-        const targetScrollTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+        const targetScrollTop =
+          scrollContainer.scrollTop + (targetRect.top - containerRect.top) - topInset;
 
         scrollContainer.scrollTo({
           top: Math.max(0, targetScrollTop),
@@ -230,7 +245,6 @@ export function useLazyDiffRendering({
         return true;
       };
 
-      let attempts = 0;
       const attemptScroll = () => {
         requestAnimationFrame(() => {
           if (scrollRequestIdRef.current !== requestId) {
@@ -245,7 +259,7 @@ export function useLazyDiffRendering({
             return;
           }
 
-          if (!scrollToFile()) {
+          if (!scrollToTarget()) {
             if (attempts < SIDEBAR_SCROLL_MAX_ATTEMPTS) {
               attempts++;
               attemptScroll();
@@ -257,7 +271,7 @@ export function useLazyDiffRendering({
             if (scrollRequestIdRef.current !== requestId) {
               return;
             }
-            scrollToFile();
+            scrollToTarget();
           }, SIDEBAR_SCROLL_CORRECTION_DELAY_MS);
         });
       };

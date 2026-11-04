@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CommentThread, DiffFile } from '../../../types/diff';
 
-import { findCommentPosition } from './positionHelpers';
+import { findCommentPosition, findFirstChangePosition } from './positionHelpers';
 
 const mockFiles: DiffFile[] = [
   {
@@ -56,5 +56,63 @@ describe('findCommentPosition', () => {
       lineIndex: 1,
       side: 'right',
     });
+  });
+});
+
+describe('findFirstChangePosition', () => {
+  const contextOnlyChunk: DiffFile['chunks'][number] = {
+    oldStart: 1,
+    oldLines: 1,
+    newStart: 1,
+    newLines: 1,
+    lines: [{ type: 'normal', oldLineNumber: 1, newLineNumber: 1, content: ' same' }],
+    header: '@@ -1 +1 @@',
+  };
+
+  it('returns the first changed line after leading context', () => {
+    const file: DiffFile = {
+      path: 'file.ts',
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      chunks: [
+        contextOnlyChunk,
+        {
+          ...contextOnlyChunk,
+          lines: [
+            { type: 'normal', oldLineNumber: 5, newLineNumber: 5, content: ' same' },
+            { type: 'add', newLineNumber: 6, content: '+added' },
+          ],
+        },
+      ],
+    };
+
+    expect(findFirstChangePosition(file, 3)).toEqual({
+      fileIndex: 3,
+      chunkIndex: 1,
+      lineIndex: 1,
+      side: 'right',
+    });
+  });
+
+  it('puts a deleted first change on the left side', () => {
+    expect(findFirstChangePosition(mockFiles[0]!, 0)).toEqual({
+      fileIndex: 0,
+      chunkIndex: 0,
+      lineIndex: 0,
+      side: 'left',
+    });
+  });
+
+  it('returns null when the file has no added or deleted lines', () => {
+    const file: DiffFile = {
+      path: 'renamed.ts',
+      status: 'renamed',
+      additions: 0,
+      deletions: 0,
+      chunks: [contextOnlyChunk],
+    };
+
+    expect(findFirstChangePosition(file, 0)).toBeNull();
   });
 });

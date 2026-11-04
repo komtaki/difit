@@ -54,7 +54,12 @@ import { fetchClientSettings, saveClientSettings } from './services/userSettings
 import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
 import { getFileElementId } from './utils/domUtils';
-import { findCommentPosition, findLinePosition } from './utils/navigation/positionHelpers';
+import { getElementId } from './utils/navigation/domHelpers';
+import {
+  findCommentPosition,
+  findFirstChangePosition,
+  findLinePosition,
+} from './utils/navigation/positionHelpers';
 import { resolveEventSourceUrl } from './utils/eventSourceUrl';
 import {
   EMPTY_MERGED_CHUNKS_STATE,
@@ -70,6 +75,7 @@ import {
   preserveServerFindingHistory,
 } from './utils/reviewThreads';
 import { findSymbolTarget } from './utils/symbolTarget';
+import { getViewerForFile } from './viewers/registry';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
@@ -1235,16 +1241,29 @@ function App() {
     [lspStatus, lookupSymbol],
   );
 
+  const getFirstChangeElementId = useCallback(
+    (filePath: string) => {
+      if (collapsedFiles.has(filePath)) return undefined;
+      const fileIndex = navigableFiles.findIndex((file) => file.path === filePath);
+      const file = navigableFiles[fileIndex];
+      if (!file || getViewerForFile(file).id !== 'default') return undefined;
+      const position = findFirstChangePosition(file, fileIndex);
+      return position ? getElementId(position, diffMode) : undefined;
+    },
+    [collapsedFiles, diffMode, navigableFiles],
+  );
+
   const handleScrollToFile = useCallback(
     (filePath: string) => {
+      const lineElementId = getFirstChangeElementId(filePath);
       if (activeTab === 'files') {
-        scrollFileIntoDiffContainer(filePath);
+        scrollFileIntoDiffContainer(filePath, lineElementId);
         return;
       }
       setSelectedTab('files');
-      requestAnimationFrame(() => scrollFileIntoDiffContainer(filePath));
+      requestAnimationFrame(() => scrollFileIntoDiffContainer(filePath, lineElementId));
     },
-    [activeTab, scrollFileIntoDiffContainer],
+    [activeTab, getFirstChangeElementId, scrollFileIntoDiffContainer],
   );
 
   const handleOpenInEditor = useCallback(

@@ -1456,3 +1456,131 @@ describe('App Component - Symbol navigation', () => {
     );
   });
 });
+
+describe('App Component - Opening a file from the file list', () => {
+  const contextLines = [1, 2, 3, 4, 5].map((lineNumber) => ({
+    type: 'normal' as const,
+    oldLineNumber: lineNumber,
+    newLineNumber: lineNumber,
+    content: `const line${lineNumber} = ${lineNumber};`,
+  }));
+
+  const openFileDiff: DiffResponse = {
+    ...mockDiffResponse,
+    files: [
+      {
+        path: 'src/changed.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        chunks: [
+          {
+            oldStart: 1,
+            oldLines: 5,
+            newStart: 1,
+            newLines: 6,
+            header: '@@ -1,5 +1,6 @@',
+            lines: [
+              ...contextLines,
+              { type: 'add', newLineNumber: 6, content: 'const added = 6;' },
+            ],
+          },
+        ],
+      },
+      {
+        path: 'src/context-only.ts',
+        status: 'renamed',
+        oldPath: 'src/old-name.ts',
+        additions: 0,
+        deletions: 0,
+        chunks: [
+          {
+            oldStart: 1,
+            oldLines: 5,
+            newStart: 1,
+            newLines: 5,
+            header: '@@ -1,5 +1,5 @@',
+            lines: contextLines,
+          },
+        ],
+      },
+    ],
+  };
+
+  const FILE_HEADER_TOP = 100;
+  const FIRST_CHANGE_TOP = 700;
+
+  const stubTop = (element: Element, top: number) => {
+    element.getBoundingClientRect = () =>
+      ({ top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20 }) as DOMRect;
+  };
+
+  const clickFileRow = async (path: string) => {
+    const rows = await screen.findAllByTitle(path);
+    const row = rows.map((node) => node.closest('[data-file-row]')).find(Boolean);
+    if (!row) throw new Error(`file row for ${path} not found`);
+    fireEvent.click(row);
+  };
+
+  const stubFileLayout = (path: string) => {
+    const fileSection = document.querySelector(`[data-file-path="${path}"]`);
+    if (!fileSection) throw new Error(`file section for ${path} not found`);
+    stubTop(fileSection, FILE_HEADER_TOP);
+    fileSection
+      .querySelectorAll('[id^="file-"]')
+      .forEach((line) => stubTop(line, FIRST_CHANGE_TOP));
+  };
+
+  let scrollToSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+    mockFetch(openFileDiff);
+    scrollToSpy = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    scrollToSpy.mockRestore();
+  });
+
+  it('scrolls to the first changed line instead of the file header', async () => {
+    renderApp();
+    await waitFor(() =>
+      expect(document.getElementById('file-0-chunk-0-line-5-right')).toBeInTheDocument(),
+    );
+    stubFileLayout('src/changed.ts');
+
+    await clickFileRow('src/changed.ts');
+
+    await waitFor(() => expect(scrollToSpy).toHaveBeenCalledWith({ top: FIRST_CHANGE_TOP }));
+    expect(scrollToSpy).not.toHaveBeenCalledWith({ top: FILE_HEADER_TOP });
+  });
+
+  it('scrolls to the file header when the file has no added or deleted lines', async () => {
+    renderApp();
+    await waitFor(() =>
+      expect(document.getElementById('file-1-chunk-0-line-0-right')).toBeInTheDocument(),
+    );
+    stubFileLayout('src/context-only.ts');
+
+    await clickFileRow('src/context-only.ts');
+
+    await waitFor(() => expect(scrollToSpy).toHaveBeenCalledWith({ top: FILE_HEADER_TOP }));
+  });
+
+  it('scrolls to the file header when the file is collapsed', async () => {
+    mockViewedFiles = new Set(['src/changed.ts']);
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getAllByTitle('Expand file (Alt+Click to expand all)')).not.toHaveLength(0),
+    );
+    stubFileLayout('src/changed.ts');
+
+    await clickFileRow('src/changed.ts');
+
+    await waitFor(() => expect(scrollToSpy).toHaveBeenCalledWith({ top: FILE_HEADER_TOP }));
+    expect(scrollToSpy).not.toHaveBeenCalledWith({ top: FIRST_CHANGE_TOP });
+  });
+});
