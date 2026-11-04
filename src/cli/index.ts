@@ -102,7 +102,7 @@ interface CliOptions {
 const program = new Command();
 
 program
-  .name('difit')
+  .name('lensdiff')
   .description('A lightweight Git diff viewer with GitHub-like interface')
   .version(pkg.version, '-v, --version', 'output the version number')
   .enablePositionalOptions()
@@ -269,7 +269,7 @@ program
           return;
         }
 
-        console.log(`\n🚀 difit server started on ${url}`);
+        console.log(`\n🚀 lensdiff server started on ${url}`);
         console.log(`📋 Reviewing: ${stdinReviewLabel}`);
         if (options.keepAlive) {
           console.log('🔒 Keep-alive mode: server will stay running after browser disconnects');
@@ -333,7 +333,7 @@ program
         return;
       }
 
-      console.log(`\n🚀 difit server started on ${url}`);
+      console.log(`\n🚀 lensdiff server started on ${url}`);
       console.log(`📋 Reviewing: ${selection.targetCommitish}`);
 
       if (options.keepAlive) {
@@ -356,7 +356,7 @@ program
       }
 
       process.on('SIGINT', async () => {
-        console.log('\n👋 Shutting down difit server...');
+        console.log('\n👋 Shutting down lensdiff server...');
 
         // Try to fetch comments before shutting down
         try {

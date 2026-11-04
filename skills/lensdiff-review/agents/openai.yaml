@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Lensdiff Review'
+  short_description: 'Review diffs and open lensdiff with inline findings.'
+  default_prompt: 'Use $lensdiff-review to review a diff or PR, convert concrete findings into --comment entries, and open lensdiff with those comments preloaded, using lensdiff on PATH or node <path-to-lensdiff-clone>/dist/cli/index.js, never upstream difit.'

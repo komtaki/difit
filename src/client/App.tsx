@@ -1465,7 +1465,7 @@ function App() {
               <div className="flex flex-col gap-1 items-center">
                 <div className="text-xs relative">
                   {viewedFiles.size === diffData.files.length
-                    ? 'All diffs difit-ed!'
+                    ? 'All diffs viewed!'
                     : `${viewedFiles.size} / ${diffData.files.length} files viewed`}
                   <SparkleAnimation isActive={showSparkles} />
                 </div>

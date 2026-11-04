@@ -118,7 +118,7 @@ describe('background process lifecycle', () => {
 
     const result = startBackgroundProcess(spawnProcess);
     const rejection = expect(result).rejects.toThrow(
-      'Timed out while starting background difit server',
+      'Timed out while starting background lensdiff server',
     );
     await vi.advanceTimersByTimeAsync(10_000);
     await rejection;

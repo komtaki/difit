@@ -56,14 +56,14 @@ async function sendToServer(
 
 export function createOverviewCommand(): Command {
   const overview = new Command('overview').description(
-    'Manage the change overview on a running difit server',
+    'Manage the change overview on a running lensdiff server',
   );
 
   overview
     .command('set')
     .description('Set the change overview markdown')
     .argument('[file]', 'markdown file (reads stdin when omitted)')
-    .requiredOption('--port <port>', 'port of the running difit server', parseInt)
+    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
     .action(async (file: string | undefined, opts: { port: number }) => {
       try {
         const markdown = await readOverviewInput(file);
@@ -79,7 +79,7 @@ export function createOverviewCommand(): Command {
 
 export function createReviewerCommand(): Command {
   const reviewer = new Command('reviewer').description(
-    'Report AI reviewer progress to a running difit server',
+    'Report AI reviewer progress to a running lensdiff server',
   );
 
   for (const { name, status, description } of reviewerSubcommands) {
@@ -87,7 +87,7 @@ export function createReviewerCommand(): Command {
       .command(name)
       .description(description)
       .argument('<name>', 'reviewer name')
-      .requiredOption('--port <port>', 'port of the running difit server', parseInt)
+      .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
       .action(async (reviewerName: string, opts: { port: number }) => {
         try {
           await sendToServer(opts.port, '/api/reviewers', 'POST', { name: reviewerName, status });

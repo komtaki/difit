@@ -1322,12 +1322,12 @@ export async function startServer(
         <!DOCTYPE html>
         <html>
           <head>
-            <title>difit - Dev Mode</title>
+            <title>lensdiff - Dev Mode</title>
           </head>
           <body>
             <div id="root"></div>
             <script>
-              console.log('difit development mode');
+              console.log('lensdiff development mode');
               console.log('Diff data available at /api/diff');
             </script>
           </body>

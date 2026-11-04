@@ -982,7 +982,7 @@ describe('CLI index.ts', () => {
             clearComments: options.clean,
           });
 
-          console.log(`\n🚀 difit server started on ${url}`);
+          console.log(`\n🚀 lensdiff server started on ${url}`);
           console.log(`📋 Reviewing: ${commitish}`);
 
           if (options.clean) {
@@ -1029,7 +1029,7 @@ describe('CLI index.ts', () => {
             clearComments: options.clean,
           });
 
-          console.log(`\n🚀 difit server started on ${url}`);
+          console.log(`\n🚀 lensdiff server started on ${url}`);
           console.log(`📋 Reviewing: ${commitish}`);
 
           if (options.clean) {
@@ -1080,7 +1080,7 @@ describe('CLI index.ts', () => {
             keepAlive: options.keepAlive,
           });
 
-          console.log(`\n🚀 difit server started on ${url}`);
+          console.log(`\n🚀 lensdiff server started on ${url}`);
           console.log(`📋 Reviewing: ${commitish}`);
 
           if (options.keepAlive) {
@@ -1129,7 +1129,7 @@ describe('CLI index.ts', () => {
             keepAlive: options.keepAlive,
           });
 
-          console.log(`\n🚀 difit server started on ${url}`);
+          console.log(`\n🚀 lensdiff server started on ${url}`);
           console.log(`📋 Reviewing: ${commitish}`);
 
           if (options.keepAlive) {
@@ -1176,7 +1176,7 @@ describe('CLI index.ts', () => {
             openBrowser: options.open,
           });
 
-          console.log(`\n🚀 difit server started on ${url}`);
+          console.log(`\n🚀 lensdiff server started on ${url}`);
           console.log(`📋 Reviewing: ${commitish}`);
 
           if (isEmpty) {
@@ -1192,7 +1192,7 @@ describe('CLI index.ts', () => {
       await program.parseAsync([], { from: 'user' });
 
       expect(console.log).toHaveBeenCalledWith(
-        '\n🚀 difit server started on http://localhost:4966',
+        '\n🚀 lensdiff server started on http://localhost:4966',
       );
       expect(console.log).toHaveBeenCalledWith('📋 Reviewing: HEAD');
     });
@@ -1222,7 +1222,7 @@ describe('CLI index.ts', () => {
             openBrowser: options.open,
           });
 
-          console.log(`\n🚀 difit server started on ${url}`);
+          console.log(`\n🚀 lensdiff server started on ${url}`);
           console.log(`📋 Reviewing: ${commitish}`);
 
           if (isEmpty) {

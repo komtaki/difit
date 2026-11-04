@@ -13,7 +13,9 @@ interface CommentImportResponse {
 
 export function handleCommandError(error: unknown, port: number): never {
   if (error instanceof TypeError && error.message.includes('fetch failed')) {
-    console.error(`Error: Cannot connect to difit server on port ${port}. Is the server running?`);
+    console.error(
+      `Error: Cannot connect to lensdiff server on port ${port}. Is the server running?`,
+    );
   } else {
     console.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
@@ -39,14 +41,14 @@ async function parseCommentAddInput(json?: string): Promise<string> {
 
 export function createCommentCommand(): Command {
   const comment = new Command('comment').description(
-    'Add, retrieve, or resolve comments on a running difit server',
+    'Add, retrieve, or resolve comments on a running lensdiff server',
   );
 
   comment
     .command('add')
-    .description('Add comments to a running difit server')
+    .description('Add comments to a running lensdiff server')
     .argument('[json]', 'comment import JSON (object or array)')
-    .requiredOption('--port <port>', 'port of the running difit server', parseInt)
+    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
     .action(async (json: string | undefined, opts: { port: number }) => {
       try {
         const input = await parseCommentAddInput(json);
@@ -82,8 +84,8 @@ export function createCommentCommand(): Command {
 
   comment
     .command('get')
-    .description('Retrieve comments from a running difit server')
-    .requiredOption('--port <port>', 'port of the running difit server', parseInt)
+    .description('Retrieve comments from a running lensdiff server')
+    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
     .addOption(
       new Option('--format <format>', 'output format').choices(['text', 'json']).default('text'),
     )
@@ -114,9 +116,9 @@ export function createCommentCommand(): Command {
   comment
     .command('resolve')
     .alias('remove')
-    .description('Resolve (remove) comment threads on a running difit server')
+    .description('Resolve (remove) comment threads on a running lensdiff server')
     .argument('<threadIds...>', 'thread IDs to resolve')
-    .requiredOption('--port <port>', 'port of the running difit server', parseInt)
+    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
     .action(async (threadIds: string[], opts: { port: number }) => {
       try {
         const results = await Promise.all(

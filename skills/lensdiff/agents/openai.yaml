@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Lensdiff'
+  short_description: 'Request user review or open lensdiff from agents.'
+  default_prompt: 'Use $lensdiff to ask the user for a review through lensdiff after code changes, using lensdiff on PATH or node <path-to-lensdiff-clone>/dist/cli/index.js, never upstream difit.'

@@ -168,7 +168,7 @@ describe('review commands', () => {
       ]);
 
       expect(consoleErrors[0]).toBe(
-        'Error: Cannot connect to difit server on port 9999. Is the server running?',
+        'Error: Cannot connect to lensdiff server on port 9999. Is the server running?',
       );
       expect(process.exit).toHaveBeenCalledWith(1);
     });
@@ -238,7 +238,7 @@ describe('review commands', () => {
       ]);
 
       expect(consoleErrors[0]).toBe(
-        'Error: Cannot connect to difit server on port 9999. Is the server running?',
+        'Error: Cannot connect to lensdiff server on port 9999. Is the server running?',
       );
       expect(process.exit).toHaveBeenCalledWith(1);
     });
