@@ -66,10 +66,10 @@ const HighlightedFile = memo(function HighlightedFile({
       {({ style, tokens, getTokenProps }) => (
         <div
           ref={scrollContainerRef}
-          className="relative min-h-0 flex-1 overflow-auto font-mono text-xs leading-5"
+          className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden font-mono text-xs leading-5"
           style={{ color: style.color }}
         >
-          <div className="min-w-max py-1">
+          <div className="py-1">
             {tokens.map((lineTokens, index) => {
               const lineNumber = index + 1;
               const isTarget = lineNumber === line;
@@ -79,14 +79,12 @@ const HighlightedFile = memo(function HighlightedFile({
                   ref={isTarget ? targetLineRef : undefined}
                   data-line-number={lineNumber}
                   data-target-line={isTarget ? 'true' : undefined}
-                  className={`flex ${isTarget ? 'bg-[var(--color-diff-selected-bg)]' : ''}`}
+                  className={`flex items-start ${isTarget ? 'bg-[var(--color-diff-selected-bg)]' : ''}`}
                 >
-                  <span
-                    className={`sticky left-0 w-12 shrink-0 select-none pr-3 text-right text-github-text-muted ${isTarget ? 'bg-[var(--color-diff-selected-bg)]' : 'bg-github-bg-primary'}`}
-                  >
+                  <span className="w-12 shrink-0 select-none pr-3 text-right text-github-text-muted">
                     {lineNumber}
                   </span>
-                  <span className="whitespace-pre pr-3">
+                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pr-3">
                     {lineTokens.map((token, key) => (
                       <span key={key} {...getTokenProps({ token })} />
                     ))}

@@ -54,7 +54,7 @@ function LocationEntry({
       <span className="block break-all font-mono text-xs text-sky-500">
         {formatLocation(location)}
       </span>
-      <span className="block truncate font-mono text-xs text-github-text-primary">
+      <span className="block whitespace-pre-wrap break-words font-mono text-xs text-github-text-primary">
         {getTargetLineText(location)}
       </span>
     </>
@@ -154,7 +154,7 @@ export function SymbolPanel({
             Back
           </button>
         )}
-        <span className="min-w-0 flex-1 truncate font-mono font-semibold text-github-text-primary">
+        <span className="min-w-0 flex-1 break-all font-mono font-semibold text-github-text-primary">
           {current?.symbol ?? 'Symbol'}
         </span>
         <button
