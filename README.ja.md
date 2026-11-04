@@ -13,6 +13,9 @@ lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エ�
 追加した機能は次のとおりです。
 
 - **概要タブ**: `--overview <file>` で変更の概要を markdown で表示します。起動中のサーバーには `lensdiff overview set --port <port> [file]` で差し替えられます（`file` を省略すると stdin から読みます）。
+
+  ![概要タブ](docs/images/overview.png)
+
 - **コード説明と AI レビュー指摘**: 既存のコメント取り込み（`--comment` と `lensdiff comment add`）が `kind: "explanation"` と `kind: "finding"` を受け付けます。finding には `reviewer`、`severity`（`info` | `warn` | `error`）、`title` も必須です。
 - **採用 / 却下**: finding ごとに採用か却下を選べます。stdout に出るのは人間のコメントと、採用した AI スレッド（先頭に `[AI:<reviewer>] ` が付く）、返信した AI スレッドだけです。
 - **レビュアーの進捗**: `lensdiff reviewer start --port <port> <name>` と `lensdiff reviewer done --port <port> <name>` で報告します。
@@ -25,6 +28,8 @@ finding の例:
 ```bash
 lensdiff comment add --port 4966 '{"type":"thread","kind":"finding","reviewer":"security","severity":"warn","title":"入力が未検証","filePath":"src/api.ts","position":{"side":"new","line":42},"body":"使う前にリクエストボディを検証してください。"}'
 ```
+
+この README のスクリーンショットは `node scripts/capture-screenshots.js` で撮り直せます（先に `pnpm build` を実行します）。
 
 ### インストール
 
@@ -41,7 +46,7 @@ pnpm link --global  # lensdiff コマンドが使えるようになる
 
 以降は upstream のドキュメントです。`difit` は `lensdiff` と読み替えてください。
 
-![difit screenshot](docs/images/screenshot.png)
+![lensdiff のスクリーンショット](docs/images/screenshot.png)
 
 **difit**は、ローカルのgit上にある差分をGitHub風のビューアで閲覧・レビューできるCLIツールです。見やすい表示に加え、コメントはAIへのプロンプトとしてコピーできます。AI時代のローカルコードレビューツール！
 
