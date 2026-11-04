@@ -20,6 +20,7 @@ interface ThreadMessageItemProps {
   originalCode?: string;
   onUpdate: (newBody: string) => void;
   onResolveOrDelete: () => void;
+  action: 'resolve' | 'delete';
   actionLabel: string;
   confirmPrompt?: string;
   onClick?: (e: React.MouseEvent) => void;
@@ -34,6 +35,7 @@ function ThreadMessageItem({
   originalCode,
   onUpdate,
   onResolveOrDelete,
+  action,
   actionLabel,
   confirmPrompt,
   onClick,
@@ -44,6 +46,7 @@ function ThreadMessageItem({
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const showAuthorHeader = showAuthorBadge && Boolean(message.author);
   const isUserAuthoredMessage = message.author?.trim() === 'User';
+  const isResolveAction = action === 'resolve';
 
   useClickOutside(confirmContainerRef, () => setIsConfirming(false), isConfirming);
 
@@ -122,10 +125,10 @@ function ThreadMessageItem({
                     onResolveOrDelete();
                   }}
                   className={`whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs font-medium transition-all hover:bg-github-bg-primary ${
-                    isRootMessage ? 'text-green-700 hover:text-green-800' : 'text-github-danger'
+                    isResolveAction ? 'text-green-700 hover:text-green-800' : 'text-github-danger'
                   }`}
                 >
-                  {isRootMessage ? 'Resolve' : 'Delete'}
+                  {isResolveAction ? 'Resolve' : 'Delete'}
                 </button>
                 <button
                   type="button"
@@ -161,12 +164,12 @@ function ThreadMessageItem({
                     onResolveOrDelete();
                   }}
                   className={`rounded border border-github-border bg-github-bg-tertiary p-1.5 transition-all hover:bg-github-bg-primary ${
-                    isRootMessage ? 'text-green-700 hover:text-green-800' : 'text-github-danger'
+                    isResolveAction ? 'text-green-700 hover:text-green-800' : 'text-github-danger'
                   }`}
                   title={actionLabel}
                   aria-label={actionLabel}
                 >
-                  {isRootMessage ? <Check size={12} /> : <Trash2 size={12} />}
+                  {isResolveAction ? <Check size={12} /> : <Trash2 size={12} />}
                 </button>
               </div>
             ))}
@@ -419,8 +422,11 @@ export function CommentThreadCard({
             originalCode={thread.codeContent}
             onUpdate={(newBody) => onUpdateMessage(thread.id, rootMessage.id, newBody)}
             onResolveOrDelete={() => onRemoveThread(thread.id)}
-            actionLabel="Resolve thread"
-            confirmPrompt={confirmRootAction ? 'Resolve?' : undefined}
+            action={isReviewThread ? 'resolve' : 'delete'}
+            actionLabel={isReviewThread ? 'Resolve thread' : 'Delete thread'}
+            confirmPrompt={
+              confirmRootAction ? (isReviewThread ? 'Resolve?' : 'Delete?') : undefined
+            }
           />
 
           {thread.messages.slice(1).map((message) => (
@@ -433,6 +439,7 @@ export function CommentThreadCard({
                 originalCode={thread.codeContent}
                 onUpdate={(newBody) => onUpdateMessage(thread.id, message.id, newBody)}
                 onResolveOrDelete={() => onRemoveMessage(thread.id, message.id)}
+                action="delete"
                 actionLabel="Delete reply"
                 confirmPrompt="Delete?"
               />

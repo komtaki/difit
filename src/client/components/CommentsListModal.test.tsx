@@ -226,7 +226,7 @@ describe('CommentsListModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('uses the modal resolve handler from the resolve button', async () => {
+  it('uses the modal remove handler from the delete button', async () => {
     const user = userEvent.setup();
     const confirmSpy = vi.fn(() => false);
     vi.stubGlobal('confirm', confirmSpy);
@@ -246,7 +246,7 @@ describe('CommentsListModal', () => {
       { wrapper },
     );
 
-    await user.click(screen.getAllByTitle('Resolve thread')[0]!);
+    await user.click(screen.getAllByTitle('Delete thread')[0]!);
 
     expect(confirmSpy).toHaveBeenCalledWith('Resolve this thread?\n\n"First root comment"');
     expect(mockRemoveThread).not.toHaveBeenCalled();
