@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 
 import type { CommentThread } from '../../types/diff';
+import { useThreadKindLookup } from '../contexts/ReviewThreadContext';
 
 import { CommentThreadCard } from './CommentThreadCard';
 import type { AppearanceSettings } from './SettingsModal';
@@ -37,6 +38,7 @@ export function CommentsListModal({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const commentRefs = useRef<(HTMLDivElement | null)[]>([]);
   const { enableScope, disableScope } = useHotkeysContext();
+  const lookupThreadKind = useThreadKindLookup();
 
   const sortedThreads = [...comments].sort((a, b) => {
     const fileCompare = a.file.localeCompare(b.file);
@@ -60,14 +62,15 @@ export function CommentsListModal({
   const handleDeleteThread = useCallback(
     (thread: CommentThread) => {
       const preview = thread.messages[0]?.body || '';
-      if (confirm(`Resolve this thread?\n\n"${preview}"`)) {
+      const verb = lookupThreadKind(thread.id) === 'comment' ? 'Delete' : 'Resolve';
+      if (confirm(`${verb} this thread?\n\n"${preview}"`)) {
         onRemoveThread(thread.id);
         if (selectedIndex >= sortedThreads.length - 1 && selectedIndex > 0) {
           setSelectedIndex(selectedIndex - 1);
         }
       }
     },
-    [onRemoveThread, selectedIndex, sortedThreads.length],
+    [lookupThreadKind, onRemoveThread, selectedIndex, sortedThreads.length],
   );
 
   useEffect(() => {
