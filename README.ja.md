@@ -13,11 +13,17 @@ lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エ�
 追加した機能は次のとおりです。
 
 - **概要タブ**: `--overview <file>` で変更の概要を markdown で表示します。起動中のサーバーには `lensdiff overview set --port <port> [file]` で差し替えられます（`file` を省略すると stdin から読みます）。
+
+  ![概要タブ](docs/images/overview.png)
+
 - **コード説明と AI レビュー指摘**: 既存のコメント取り込み（`--comment` と `lensdiff comment add`）が `kind: "explanation"` と `kind: "finding"` を受け付けます。finding には `reviewer`、`severity`（`info` | `warn` | `error`）、`title` も必須です。
 - **採用 / 却下**: finding ごとに採用か却下を選べます。stdout に出るのは人間のコメントと、採用した AI スレッド（先頭に `[AI:<reviewer>] ` が付く）、返信した AI スレッドだけです。
 - **レビュアーの進捗**: `lensdiff reviewer start --port <port> <name>` と `lensdiff reviewer done --port <port> <name>` で報告します。
 - **判断を次の周に引き継ぐ**: 採用 / 却下の判断はブランチごとに `$(git rev-parse --git-common-dir)/lensdiff/decisions/<branch>.json` へ保存され、次の周のレビューに反映されます。確認と削除は `lensdiff decisions get [--branch <name>]` と `lensdiff decisions clear [--branch <name>]` です。
 - **宣言ジャンプ / 参照検索**: シンボルを Cmd/Ctrl+クリックすると、PATH 上の `ruby-lsp`、`typescript-language-server`、`pyright-langserver` で定義と参照を引きます（TypeScript はリポジトリの `node_modules/.bin` を優先します）。対象が `HEAD`、`working`、`.` のときだけ使えます。右パネルには定義を含むファイル全体を表示します。
+
+  ![シンボルパネル](docs/images/symbol-panel.png)
+
 - **ファイル全体の表示**: `--context 100000` を付けると、変更のない行を折りたたまずにファイル全体を表示します。
 
 finding の例:
@@ -25,6 +31,8 @@ finding の例:
 ```bash
 lensdiff comment add --port 4966 '{"type":"thread","kind":"finding","reviewer":"security","severity":"warn","title":"入力が未検証","filePath":"src/api.ts","position":{"side":"new","line":42},"body":"使う前にリクエストボディを検証してください。"}'
 ```
+
+この README のスクリーンショットは `node scripts/capture-screenshots.js` で撮り直せます（先に `pnpm build` を実行します）。
 
 ### インストール
 
@@ -41,7 +49,7 @@ pnpm link --global  # lensdiff コマンドが使えるようになる
 
 以降は upstream のドキュメントです。`difit` は `lensdiff` と読み替えてください。
 
-![difit screenshot](docs/images/screenshot.png)
+![lensdiff のスクリーンショット](docs/images/screenshot.png)
 
 **difit**は、ローカルのgit上にある差分をGitHub風のビューアで閲覧・レビューできるCLIツールです。見やすい表示に加え、コメントはAIへのプロンプトとしてコピーできます。AI時代のローカルコードレビューツール！
 

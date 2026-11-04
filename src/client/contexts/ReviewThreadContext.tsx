@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 
 import type { DiffCommentThread, FindingDecision, FindingMeta, ThreadKind } from '../../types/diff';
 import { getThreadKind } from '../../utils/commentImports';
@@ -40,14 +40,29 @@ export function ReviewThreadProvider({
   return <ReviewThreadContext.Provider value={value}>{children}</ReviewThreadContext.Provider>;
 }
 
+function resolveThreadKind(review: Pick<DiffCommentThread, 'kind' | 'finding'>): ThreadKind {
+  const kind = getThreadKind(review);
+  return kind === 'finding' && !review.finding ? 'comment' : kind;
+}
+
+export function useThreadKindLookup(): (threadId: string) => ThreadKind {
+  const context = useContext(ReviewThreadContext);
+  return useCallback(
+    (threadId: string) => {
+      const review = context?.reviewById.get(threadId);
+      return review ? resolveThreadKind(review) : 'comment';
+    },
+    [context],
+  );
+}
+
 export function useThreadReview(threadId: string): ThreadReview | null {
   const context = useContext(ReviewThreadContext);
   const review = context?.reviewById.get(threadId);
   if (!context || !review) return null;
 
-  const kind = getThreadKind(review);
   return {
-    kind: kind === 'finding' && !review.finding ? 'comment' : kind,
+    kind: resolveThreadKind(review),
     finding: review.finding,
     setDecision: (decision) => context.onSetFindingDecision(threadId, decision),
   };

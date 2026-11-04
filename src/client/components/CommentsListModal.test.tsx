@@ -4,7 +4,8 @@ import React from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import type { CommentThread } from '../../types/diff';
+import type { CommentThread, DiffCommentThread } from '../../types/diff';
+import { ReviewThreadProvider } from '../contexts/ReviewThreadContext';
 
 import { CommentsListModal } from './CommentsListModal';
 
@@ -226,30 +227,58 @@ describe('CommentsListModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('uses the modal resolve handler from the resolve button', async () => {
-    const user = userEvent.setup();
-    const confirmSpy = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirmSpy);
+  describe('confirm before removing a thread', () => {
+    const explanationThread: DiffCommentThread = {
+      id: 'thread-1',
+      filePath: 'src/file1.ts',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      position: { side: 'new', line: 10 },
+      messages: [],
+      kind: 'explanation',
+    };
 
-    render(
-      <CommentsListModal
-        isOpen={true}
-        onClose={vi.fn()}
-        onNavigate={vi.fn()}
-        comments={mockThreads}
-        onRemoveThread={mockRemoveThread}
-        onGenerateThreadPrompt={mockGenerateThreadPrompt}
-        onReplyToThread={mockReplyToThread}
-        onRemoveMessage={mockRemoveMessage}
-        onUpdateMessage={mockUpdateMessage}
-      />,
-      { wrapper },
-    );
+    const renderModal = (reviewThreads: DiffCommentThread[]) => {
+      const confirmSpy = vi.fn(() => false);
+      vi.stubGlobal('confirm', confirmSpy);
+      render(
+        <ReviewThreadProvider threads={reviewThreads} onSetFindingDecision={vi.fn()}>
+          <CommentsListModal
+            isOpen={true}
+            onClose={vi.fn()}
+            onNavigate={vi.fn()}
+            comments={mockThreads}
+            onRemoveThread={mockRemoveThread}
+            onGenerateThreadPrompt={mockGenerateThreadPrompt}
+            onReplyToThread={mockReplyToThread}
+            onRemoveMessage={mockRemoveMessage}
+            onUpdateMessage={mockUpdateMessage}
+          />
+        </ReviewThreadProvider>,
+        { wrapper },
+      );
+      return confirmSpy;
+    };
 
-    await user.click(screen.getAllByTitle('Resolve thread')[0]!);
+    it('asks to delete a human comment thread', async () => {
+      const user = userEvent.setup();
+      const confirmSpy = renderModal([]);
 
-    expect(confirmSpy).toHaveBeenCalledWith('Resolve this thread?\n\n"First root comment"');
-    expect(mockRemoveThread).not.toHaveBeenCalled();
+      await user.click(screen.getAllByTitle('Delete thread')[0]!);
+
+      expect(confirmSpy).toHaveBeenCalledWith('Delete this thread?\n\n"First root comment"');
+      expect(mockRemoveThread).not.toHaveBeenCalled();
+    });
+
+    it('asks to resolve an AI review thread', async () => {
+      const user = userEvent.setup();
+      const confirmSpy = renderModal([explanationThread]);
+
+      await user.click(screen.getByTitle('Resolve thread'));
+
+      expect(confirmSpy).toHaveBeenCalledWith('Resolve this thread?\n\n"First root comment"');
+      expect(mockRemoveThread).not.toHaveBeenCalled();
+    });
   });
 
   it('shows empty state when there are no threads', () => {

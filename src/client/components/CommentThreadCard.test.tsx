@@ -50,7 +50,7 @@ describe('CommentThreadCard', () => {
     expect(screen.queryByTitle('Delete reply')).not.toBeInTheDocument();
   });
 
-  it('keeps resolve available for root comments even when not authored by the user', () => {
+  it('keeps delete available for root comments even when not authored by the user', () => {
     render(
       <CommentThreadCard
         thread={{
@@ -70,11 +70,11 @@ describe('CommentThreadCard', () => {
       />,
     );
 
-    expect(screen.getByTitle('Resolve thread')).toBeInTheDocument();
+    expect(screen.getByTitle('Delete thread')).toBeInTheDocument();
     expect(screen.queryByTitle('Edit message')).not.toBeInTheDocument();
   });
 
-  it('shows an inline confirmation before resolving a root comment by default', async () => {
+  it('shows an inline confirmation before deleting a root comment by default', async () => {
     const user = userEvent.setup();
     const onRemoveThread = vi.fn();
 
@@ -89,17 +89,17 @@ describe('CommentThreadCard', () => {
       />,
     );
 
-    await user.click(screen.getByTitle('Resolve thread'));
+    await user.click(screen.getByTitle('Delete thread'));
 
     expect(onRemoveThread).not.toHaveBeenCalled();
-    expect(screen.getByText('Resolve?')).toBeInTheDocument();
+    expect(screen.getByText('Delete?')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Resolve' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
 
     expect(onRemoveThread).toHaveBeenCalledWith('thread-1');
   });
 
-  it('cancels the inline resolve confirmation with the cancel button', async () => {
+  it('cancels the inline delete confirmation with the cancel button', async () => {
     const user = userEvent.setup();
     const onRemoveThread = vi.fn();
 
@@ -114,15 +114,15 @@ describe('CommentThreadCard', () => {
       />,
     );
 
-    await user.click(screen.getByTitle('Resolve thread'));
+    await user.click(screen.getByTitle('Delete thread'));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(onRemoveThread).not.toHaveBeenCalled();
-    expect(screen.queryByText('Resolve?')).not.toBeInTheDocument();
-    expect(screen.getByTitle('Resolve thread')).toBeInTheDocument();
+    expect(screen.queryByText('Delete?')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Delete thread')).toBeInTheDocument();
   });
 
-  it('cancels the inline resolve confirmation with Escape', async () => {
+  it('cancels the inline delete confirmation with Escape', async () => {
     const user = userEvent.setup();
     const onRemoveThread = vi.fn();
 
@@ -137,11 +137,11 @@ describe('CommentThreadCard', () => {
       />,
     );
 
-    await user.click(screen.getByTitle('Resolve thread'));
+    await user.click(screen.getByTitle('Delete thread'));
     await user.keyboard('{Escape}');
 
     expect(onRemoveThread).not.toHaveBeenCalled();
-    expect(screen.queryByText('Resolve?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete?')).not.toBeInTheDocument();
   });
 
   it('consumes Escape so surrounding Escape handlers do not fire', async () => {
@@ -161,17 +161,17 @@ describe('CommentThreadCard', () => {
         />,
       );
 
-      await user.click(screen.getByTitle('Resolve thread'));
+      await user.click(screen.getByTitle('Delete thread'));
       await user.keyboard('{Escape}');
 
-      expect(screen.queryByText('Resolve?')).not.toBeInTheDocument();
+      expect(screen.queryByText('Delete?')).not.toBeInTheDocument();
       expect(outerKeyDown).not.toHaveBeenCalled();
     } finally {
       document.removeEventListener('keydown', outerKeyDown);
     }
   });
 
-  it('cancels the inline resolve confirmation when clicking outside', async () => {
+  it('cancels the inline delete confirmation when clicking outside', async () => {
     const user = userEvent.setup();
     const onRemoveThread = vi.fn();
 
@@ -189,14 +189,14 @@ describe('CommentThreadCard', () => {
       </div>,
     );
 
-    await user.click(screen.getByTitle('Resolve thread'));
+    await user.click(screen.getByTitle('Delete thread'));
     await user.click(screen.getByRole('button', { name: 'outside' }));
 
     expect(onRemoveThread).not.toHaveBeenCalled();
-    expect(screen.queryByText('Resolve?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete?')).not.toBeInTheDocument();
   });
 
-  it('resolves immediately without confirmation when confirmRootAction is false', async () => {
+  it('deletes immediately without confirmation when confirmRootAction is false', async () => {
     const user = userEvent.setup();
     const onRemoveThread = vi.fn();
 
@@ -212,9 +212,9 @@ describe('CommentThreadCard', () => {
       />,
     );
 
-    await user.click(screen.getByTitle('Resolve thread'));
+    await user.click(screen.getByTitle('Delete thread'));
 
-    expect(screen.queryByText('Resolve?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete?')).not.toBeInTheDocument();
     expect(onRemoveThread).toHaveBeenCalledWith('thread-1');
   });
 
@@ -237,14 +237,14 @@ describe('CommentThreadCard', () => {
     // Messages and actions are hidden; a one-line summary with the count remains
     expect(screen.queryByText('Reply comment')).not.toBeInTheDocument();
     expect(screen.queryByText(/Copy Prompt/)).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Resolve thread')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Delete thread')).not.toBeInTheDocument();
     expect(screen.getByText('Root comment')).toBeInTheDocument();
     expect(screen.getByLabelText('2 messages in thread')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Expand thread' }));
 
     expect(screen.getByText('Reply comment')).toBeInTheDocument();
-    expect(screen.getByTitle('Resolve thread')).toBeInTheDocument();
+    expect(screen.getByTitle('Delete thread')).toBeInTheDocument();
   });
 
   it('expands a collapsed thread by clicking the summary line', async () => {
@@ -517,6 +517,31 @@ describe('CommentThreadCard', () => {
       expect(headerInfo).not.toHaveClass('flex-wrap');
       expect(headerInfo).toHaveClass('min-w-0', 'flex-1');
       expect(headerInfo?.parentElement).not.toHaveClass('flex-wrap');
+    });
+
+    it('keeps the resolve check on the root of AI threads', async () => {
+      const user = userEvent.setup();
+      renderReviewCard(toDiffThread('explanation'));
+
+      expect(screen.queryByTitle('Delete thread')).not.toBeInTheDocument();
+      await user.click(screen.getByTitle('Resolve thread'));
+
+      expect(screen.getByText('Resolve?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Resolve' })).toBeInTheDocument();
+    });
+
+    it('keeps the resolve check on the root of findings', () => {
+      renderReviewCard(toDiffThread('finding', baseFinding));
+
+      expect(screen.getByTitle('Resolve thread')).toBeInTheDocument();
+      expect(screen.queryByTitle('Delete thread')).not.toBeInTheDocument();
+    });
+
+    it('shows the delete trash on the root of human comment threads', () => {
+      renderReviewCard({ ...toDiffThread('comment'), kind: undefined });
+
+      expect(screen.getByTitle('Delete thread')).toBeInTheDocument();
+      expect(screen.queryByTitle('Resolve thread')).not.toBeInTheDocument();
     });
 
     it('adopts and rejects a finding', async () => {
