@@ -1,15 +1,45 @@
 <h1 align="center">
-  <img src="public/logo.png" alt="difit" width="260">
+  <img src="public/logo.png" alt="lensdiff" width="260">
 </h1>
-
-<p align="center">
-  <a href="https://www.npmjs.com/package/difit"><img src="https://img.shields.io/npm/v/difit.svg" alt="npm version"></a>
-  <a href="https://github.com/yoshiko-pg/difit/actions/workflows/pr.yml"><img src="https://github.com/yoshiko-pg/difit/actions/workflows/pr.yml/badge.svg" alt="CI"></a>
-</p>
 
 <p align="center">
   English | <a href="./README.ja.md">日本語</a> | <a href="./README.zh.md">简体中文</a> | <a href="./README.ko.md">한국어</a>
 </p>
+
+## About this fork
+
+lensdiff is a fork of [difit](https://github.com/yoshiko-pg/difit), extended for reviewing changes together with AI agents. It is renamed to `lensdiff` so that it is not confused with upstream `difit` or its bundled skills. The settings file `~/.difit/config.json` and the `DIFIT_*` environment variables (such as `DIFIT_CONFIG_DIR` and `DIFIT_EDITOR`) are intentionally kept, so lensdiff shares its settings with upstream difit.
+
+What it adds:
+
+- **Overview tab**: show a markdown summary of the change with `--overview <file>`, or replace it on a running server with `lensdiff overview set --port <port> [file]` (reads stdin when `file` is omitted).
+- **Code explanations and AI findings**: the existing comment import (`--comment` and `lensdiff comment add`) accepts `kind: "explanation"` and `kind: "finding"`. A finding also requires `reviewer`, `severity` (`info` | `warn` | `error`), and `title`.
+- **Adopt / Reject**: each finding can be adopted or rejected. stdout contains only human comments plus AI threads that were adopted (prefixed with `[AI:<reviewer>] `) or replied to.
+- **Reviewer progress**: `lensdiff reviewer start --port <port> <name>` and `lensdiff reviewer done --port <port> <name>`.
+- **Decisions carried to the next round**: Adopt/Reject decisions are saved per branch at `$(git rev-parse --git-common-dir)/lensdiff/decisions/<branch>.json` and applied in the next review round. Inspect or delete them with `lensdiff decisions get [--branch <name>]` and `lensdiff decisions clear [--branch <name>]`.
+- **Go to definition / references**: Cmd/Ctrl+click a symbol to look it up through `ruby-lsp`, `typescript-language-server`, or `pyright-langserver` found on PATH (for TypeScript, the repository's `node_modules/.bin` is preferred). Available only when the target is `HEAD`, `working`, or `.`. The right panel shows the whole file that contains the definition.
+- **Whole files**: `--context 100000` shows whole files without folding unchanged lines.
+
+Example finding:
+
+```bash
+lensdiff comment add --port 4966 '{"type":"thread","kind":"finding","reviewer":"security","severity":"warn","title":"Unvalidated input","filePath":"src/api.ts","position":{"side":"new","line":42},"body":"Validate the request body before use."}'
+```
+
+### Install
+
+lensdiff is not published to npm. Build it from a clone:
+
+```bash
+git clone https://github.com/komtaki/lensdiff.git
+cd lensdiff
+pnpm install
+pnpm build
+pnpm link --global  # provides the lensdiff command
+# or run it directly: node dist/cli/index.js
+```
+
+The rest of this README is upstream's documentation. Read `difit` as `lensdiff` there.
 
 ![difit screenshot](docs/images/screenshot.png)
 

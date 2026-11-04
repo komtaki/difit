@@ -104,7 +104,7 @@ async function resolveDecisionFilePath(
   let branchName: string;
   try {
     const commonDir = (await git.revparse(['--git-common-dir'])).trim();
-    decisionsDir = join(resolve(repoPath, commonDir), 'difit', 'decisions');
+    decisionsDir = join(resolve(repoPath, commonDir), 'lensdiff', 'decisions');
     branchName = branch ?? (await git.raw(['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim();
   } catch {
     return null;

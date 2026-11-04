@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 // Set environment variable to skip fetch mocking
 process.env.VITEST_SERVER_TEST = 'true';
 
+import pkg from '../../package.json' with { type: 'json' };
 import { FileWatcherService } from './file-watcher.js';
 import { startServer } from './server.js';
 import type { CommentImport } from '../types/diff.js';
@@ -1575,8 +1576,8 @@ describe('Server Integration Tests', () => {
       const html = await response.text();
 
       expect(response.ok).toBe(true);
-      expect(html).toContain('difit - Dev Mode');
-      expect(html).toContain('difit development mode');
+      expect(html).toContain(`${pkg.name} - Dev Mode`);
+      expect(html).toContain(`${pkg.name} development mode`);
     });
 
     it('serves static files in production mode', async () => {

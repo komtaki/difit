@@ -136,7 +136,7 @@ describe('createDecisionStore', () => {
 
     const commonDir = await fs.realpath(join(repoPath, '.git'));
     expect(await fs.realpath(store!.filePath)).toBe(
-      join(commonDir, 'difit', 'decisions', 'feature', 'login.json'),
+      join(commonDir, 'lensdiff', 'decisions', 'feature', 'login.json'),
     );
 
     const reloaded = await createDecisionStore({ repoPath });

@@ -1,7 +1,7 @@
 {
-  "name": "difit",
+  "name": "lensdiff",
   "version": "5.0.12",
-  "description": "A lightweight command-line tool that spins up a local web server to display Git commit diffs in a GitHub-like Files changed view",
+  "description": "AI と一緒にレビューするための difit の fork。概要タブ、行ごとのコード説明、採用/却下できる AI レビュー指摘（判断は次の周に引き継ぐ）、言語サーバーによる宣言ジャンプを追加",
   "keywords": [
     "cli",
     "code-review",
@@ -13,18 +13,18 @@
     "review",
     "tailwind"
   ],
-  "homepage": "https://github.com/yoshiko-pg/difit",
+  "homepage": "https://github.com/komtaki/lensdiff",
   "bugs": {
-    "url": "https://github.com/yoshiko-pg/difit/issues"
+    "url": "https://github.com/komtaki/lensdiff/issues"
   },
   "license": "MIT",
   "author": "yoshiko-pg",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yoshiko-pg/difit.git"
+    "url": "git+https://github.com/komtaki/lensdiff.git"
   },
   "bin": {
-    "difit": "./dist/cli/index.js"
+    "lensdiff": "./dist/cli/index.js"
   },
   "files": [
     "dist",
