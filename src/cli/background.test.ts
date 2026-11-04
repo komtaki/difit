@@ -3,6 +3,8 @@ import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CLI_NAME } from './cli-name.js';
+
 const {
   BACKGROUND_CHILD_ENV,
   parseBackgroundHandshakeMessage,
@@ -118,7 +120,7 @@ describe('background process lifecycle', () => {
 
     const result = startBackgroundProcess(spawnProcess);
     const rejection = expect(result).rejects.toThrow(
-      'Timed out while starting background lensdiff server',
+      `Timed out while starting background ${CLI_NAME} server`,
     );
     await vi.advanceTimersByTimeAsync(10_000);
     await rejection;

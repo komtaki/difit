@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 
+import { CLI_NAME } from './cli-name.js';
+
 export interface BackgroundServerInfo {
   port: number;
   url: string;
@@ -46,7 +48,7 @@ export function ignoreStdioErrorsForBackgroundDaemon(): void {
 export async function startBackgroundProcess(spawnProcess: typeof spawn = spawn): Promise<void> {
   const scriptPath = process.argv[1];
   if (!scriptPath) {
-    throw new Error('Unable to determine lensdiff entrypoint for background process');
+    throw new Error(`Unable to determine ${CLI_NAME} entrypoint for background process`);
   }
 
   const childArgs = process.argv.slice(2).filter((arg) => arg !== '--background');
@@ -119,7 +121,8 @@ export async function startBackgroundProcess(spawnProcess: typeof spawn = spawn)
         const startupError = stderr.trim();
         reject(
           new Error(
-            startupError || `Background lensdiff server exited early (code ${code ?? 'unknown'})`,
+            startupError ||
+              `Background ${CLI_NAME} server exited early (code ${code ?? 'unknown'})`,
           ),
         );
       });
@@ -129,7 +132,7 @@ export async function startBackgroundProcess(spawnProcess: typeof spawn = spawn)
       finish(() => {
         child.kill();
         child.stderr?.destroy();
-        reject(new Error('Timed out while starting background lensdiff server'));
+        reject(new Error(`Timed out while starting background ${CLI_NAME} server`));
       });
     }, 10_000);
 

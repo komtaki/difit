@@ -8,7 +8,7 @@
 
 ## この fork について
 
-lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エージェントと一緒に変更をレビューするための機能を追加しています。upstream の `difit` や同梱 skill と混同しないよう、名前を `lensdiff` に変えています。
+lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エージェントと一緒に変更をレビューするための機能を追加しています。upstream の `difit` や同梱 skill と混同しないよう、名前を `lensdiff` に変えています。設定ファイル `~/.difit/config.json` と `DIFIT_*` 環境変数（`DIFIT_CONFIG_DIR`、`DIFIT_EDITOR` など）は意図的にそのまま残しており、lensdiff は upstream の difit と設定を共有します。
 
 追加した機能は次のとおりです。
 

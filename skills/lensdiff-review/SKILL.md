@@ -17,12 +17,7 @@ lensdiff opens an external browser UI and starts a long-running local server, so
 
 This skill launches a requested git diff in a viewer that is easy for humans to read. At the same time, the agent can attach arbitrary comments via the `--comment` option.
 This comment mechanism is well suited for code review findings and code explanations.
-Before running commands, choose `<lensdiff-command>` using the following rule:
-
-- If `command -v lensdiff` succeeds, use `lensdiff`.
-- Otherwise, if a built clone of lensdiff is available (it contains `dist/cli/index.js`), use `node <path-to-lensdiff-clone>/dist/cli/index.js`.
-- `npx lensdiff` does not work: lensdiff is not published to npm.
-- Never substitute the upstream `difit` command (`difit` or `npx difit`). If neither option above is available, ask the user how to run lensdiff.
+Choose `<lensdiff-command>` by the rule in the Overview section of the `lensdiff` skill (`skills/lensdiff/SKILL.md`).
 
 ## Steps
 

@@ -18,10 +18,8 @@ lensdiff opens an external browser UI and starts a long-running local server, so
 This skill requests a code review from the user using lensdiff.
 Before running commands, choose `<lensdiff-command>` using the following rule:
 
-- If `command -v lensdiff` succeeds, use `lensdiff`.
-- Otherwise, if a built clone of lensdiff is available (it contains `dist/cli/index.js`), use `node <path-to-lensdiff-clone>/dist/cli/index.js`.
-- `npx lensdiff` does not work: lensdiff is not published to npm.
-- Never substitute the upstream `difit` command (`difit` or `npx difit`). If neither option above is available, ask the user how to run lensdiff.
+- Use `lensdiff` if `command -v lensdiff` succeeds; otherwise use `node <path-to-lensdiff-clone>/dist/cli/index.js`.
+- If neither is available, ask the user how to run lensdiff. Never substitute `difit` or `npx difit`.
 
 If the user leaves review comments, they are printed to stdout when the chosen lensdiff command exits.
 When review comments are returned, continue work and address them.

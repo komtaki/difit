@@ -2,6 +2,7 @@ import { Command, Option } from 'commander';
 
 import { parseCommentImportValue } from '../utils/commentImports.js';
 
+import { CLI_NAME } from './cli-name.js';
 import { detectStdinSource, readStdin } from './utils.js';
 
 interface CommentImportResponse {
@@ -14,7 +15,7 @@ interface CommentImportResponse {
 export function handleCommandError(error: unknown, port: number): never {
   if (error instanceof TypeError && error.message.includes('fetch failed')) {
     console.error(
-      `Error: Cannot connect to lensdiff server on port ${port}. Is the server running?`,
+      `Error: Cannot connect to ${CLI_NAME} server on port ${port}. Is the server running?`,
     );
   } else {
     console.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -41,14 +42,14 @@ async function parseCommentAddInput(json?: string): Promise<string> {
 
 export function createCommentCommand(): Command {
   const comment = new Command('comment').description(
-    'Add, retrieve, or resolve comments on a running lensdiff server',
+    `Add, retrieve, or resolve comments on a running ${CLI_NAME} server`,
   );
 
   comment
     .command('add')
-    .description('Add comments to a running lensdiff server')
+    .description(`Add comments to a running ${CLI_NAME} server`)
     .argument('[json]', 'comment import JSON (object or array)')
-    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
+    .requiredOption('--port <port>', `port of the running ${CLI_NAME} server`, parseInt)
     .action(async (json: string | undefined, opts: { port: number }) => {
       try {
         const input = await parseCommentAddInput(json);
@@ -84,8 +85,8 @@ export function createCommentCommand(): Command {
 
   comment
     .command('get')
-    .description('Retrieve comments from a running lensdiff server')
-    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
+    .description(`Retrieve comments from a running ${CLI_NAME} server`)
+    .requiredOption('--port <port>', `port of the running ${CLI_NAME} server`, parseInt)
     .addOption(
       new Option('--format <format>', 'output format').choices(['text', 'json']).default('text'),
     )
@@ -116,9 +117,9 @@ export function createCommentCommand(): Command {
   comment
     .command('resolve')
     .alias('remove')
-    .description('Resolve (remove) comment threads on a running lensdiff server')
+    .description(`Resolve (remove) comment threads on a running ${CLI_NAME} server`)
     .argument('<threadIds...>', 'thread IDs to resolve')
-    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
+    .requiredOption('--port <port>', `port of the running ${CLI_NAME} server`, parseInt)
     .action(async (threadIds: string[], opts: { port: number }) => {
       try {
         const results = await Promise.all(

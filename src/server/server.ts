@@ -9,6 +9,7 @@ import open from 'open';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+import pkg from '../../package.json' with { type: 'json' };
 import { type DiffMode } from '../types/watch.js';
 import { formatCommentsOutput } from '../utils/commentFormatting.js';
 import {
@@ -1322,12 +1323,12 @@ export async function startServer(
         <!DOCTYPE html>
         <html>
           <head>
-            <title>lensdiff - Dev Mode</title>
+            <title>${pkg.name} - Dev Mode</title>
           </head>
           <body>
             <div id="root"></div>
             <script>
-              console.log('lensdiff development mode');
+              console.log('${pkg.name} development mode');
               console.log('Diff data available at /api/diff');
             </script>
           </body>

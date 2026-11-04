@@ -19,6 +19,7 @@ import {
   getGitRoot,
   readStdin,
 } from './utils.js';
+import { CLI_NAME } from './cli-name.js';
 import { createCommentCommand } from './comment.js';
 import { createDecisionsCommand } from './decision-commands.js';
 import {
@@ -102,7 +103,7 @@ interface CliOptions {
 const program = new Command();
 
 program
-  .name('lensdiff')
+  .name(CLI_NAME)
   .description('A lightweight Git diff viewer with GitHub-like interface')
   .version(pkg.version, '-v, --version', 'output the version number')
   .enablePositionalOptions()
@@ -269,7 +270,7 @@ program
           return;
         }
 
-        console.log(`\n🚀 lensdiff server started on ${url}`);
+        console.log(`\n🚀 ${CLI_NAME} server started on ${url}`);
         console.log(`📋 Reviewing: ${stdinReviewLabel}`);
         if (options.keepAlive) {
           console.log('🔒 Keep-alive mode: server will stay running after browser disconnects');
@@ -333,7 +334,7 @@ program
         return;
       }
 
-      console.log(`\n🚀 lensdiff server started on ${url}`);
+      console.log(`\n🚀 ${CLI_NAME} server started on ${url}`);
       console.log(`📋 Reviewing: ${selection.targetCommitish}`);
 
       if (options.keepAlive) {
@@ -356,7 +357,7 @@ program
       }
 
       process.on('SIGINT', async () => {
-        console.log('\n👋 Shutting down lensdiff server...');
+        console.log(`\n👋 Shutting down ${CLI_NAME} server...`);
 
         // Try to fetch comments before shutting down
         try {

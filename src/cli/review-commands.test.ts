@@ -4,6 +4,8 @@ import { join } from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CLI_NAME } from './cli-name.js';
+
 vi.mock('./utils.js', () => ({
   detectStdinSource: vi.fn(),
   readStdin: vi.fn(),
@@ -168,7 +170,7 @@ describe('review commands', () => {
       ]);
 
       expect(consoleErrors[0]).toBe(
-        'Error: Cannot connect to lensdiff server on port 9999. Is the server running?',
+        `Error: Cannot connect to ${CLI_NAME} server on port 9999. Is the server running?`,
       );
       expect(process.exit).toHaveBeenCalledWith(1);
     });
@@ -238,7 +240,7 @@ describe('review commands', () => {
       ]);
 
       expect(consoleErrors[0]).toBe(
-        'Error: Cannot connect to lensdiff server on port 9999. Is the server running?',
+        `Error: Cannot connect to ${CLI_NAME} server on port 9999. Is the server running?`,
       );
       expect(process.exit).toHaveBeenCalledWith(1);
     });

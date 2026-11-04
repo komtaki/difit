@@ -4,6 +4,7 @@ import { Command } from 'commander';
 
 import type { ReviewerStatus } from '../types/review.js';
 
+import { CLI_NAME } from './cli-name.js';
 import { handleCommandError } from './comment.js';
 import { detectStdinSource, readStdin } from './utils.js';
 
@@ -56,14 +57,14 @@ async function sendToServer(
 
 export function createOverviewCommand(): Command {
   const overview = new Command('overview').description(
-    'Manage the change overview on a running lensdiff server',
+    `Manage the change overview on a running ${CLI_NAME} server`,
   );
 
   overview
     .command('set')
     .description('Set the change overview markdown')
     .argument('[file]', 'markdown file (reads stdin when omitted)')
-    .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
+    .requiredOption('--port <port>', `port of the running ${CLI_NAME} server`, parseInt)
     .action(async (file: string | undefined, opts: { port: number }) => {
       try {
         const markdown = await readOverviewInput(file);
@@ -79,7 +80,7 @@ export function createOverviewCommand(): Command {
 
 export function createReviewerCommand(): Command {
   const reviewer = new Command('reviewer').description(
-    'Report AI reviewer progress to a running lensdiff server',
+    `Report AI reviewer progress to a running ${CLI_NAME} server`,
   );
 
   for (const { name, status, description } of reviewerSubcommands) {
@@ -87,7 +88,7 @@ export function createReviewerCommand(): Command {
       .command(name)
       .description(description)
       .argument('<name>', 'reviewer name')
-      .requiredOption('--port <port>', 'port of the running lensdiff server', parseInt)
+      .requiredOption('--port <port>', `port of the running ${CLI_NAME} server`, parseInt)
       .action(async (reviewerName: string, opts: { port: number }) => {
         try {
           await sendToServer(opts.port, '/api/reviewers', 'POST', { name: reviewerName, status });
