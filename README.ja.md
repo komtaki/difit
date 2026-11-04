@@ -42,17 +42,17 @@ lensdiff は npm レジストリには公開していません。GitHub Release 
 npm install -g https://github.com/komtaki/lensdiff/releases/latest/download/lensdiff.tgz
 ```
 
-特定のバージョンを入れるときは、タグ `lensdiff-v<version>` の URL を指定します。
+特定のバージョンを入れるときは、タグ `v<version>` の URL を指定します。
 
 ```bash
-npm install -g https://github.com/komtaki/lensdiff/releases/download/lensdiff-v5.0.12-lensdiff.1/lensdiff.tgz
+npm install -g https://github.com/komtaki/lensdiff/releases/download/v2026.11.4/lensdiff.tgz
 ```
 
 npm 11 はインストール時に `@parcel/watcher` の install script を実行せず警告を出します。このスクリプトはソースからビルドする指定があるときだけ動くもので、ビルド済みのネイティブバイナリは optionalDependencies で入るため、ファイル変更時の自動リロードはそのまま動きます。
 
 #### リリース手順
 
-`origin/main` と同期した clean な `main` で、`package.json` の `version` を上げてから `scripts/release.sh` を実行します。ビルドと `npm pack` をおこない、`lensdiff.tgz` を添付した GitHub Release を `lensdiff-v<version>` タグで作成します。
+`main` にマージするたびに、`lensdiff.tgz` を添付した GitHub Release が自動で作成されます（`.github/workflows/release.yml`）。バージョンは UTC の日付によるカレンダーバージョニングで、タグは `vYYYY.M.D`（例: `v2026.11.4`）です。同じ日の 2 回目以降のリリースには `v2026.11.4-2` のように `-n` を付けます。この仕組みを動かすには、リポジトリで GitHub Actions を一度有効にする必要があります。
 
 #### ソースから動かす（開発用）
 

@@ -42,17 +42,17 @@ lensdiff is not published to the npm registry. Install the prebuilt tarball atta
 npm install -g https://github.com/komtaki/lensdiff/releases/latest/download/lensdiff.tgz
 ```
 
-To install a specific version, use the URL of its `lensdiff-v<version>` tag:
+To install a specific version, use the URL of its `v<version>` tag:
 
 ```bash
-npm install -g https://github.com/komtaki/lensdiff/releases/download/lensdiff-v5.0.12-lensdiff.1/lensdiff.tgz
+npm install -g https://github.com/komtaki/lensdiff/releases/download/v2026.11.4/lensdiff.tgz
 ```
 
 npm 11 skips the install script of `@parcel/watcher` and prints a warning. That script only builds from source when explicitly requested; the prebuilt native binary comes in through optionalDependencies, so live reload on file changes still works.
 
 #### Releasing
 
-On a clean `main` in sync with `origin/main`, bump `version` in `package.json` and run `scripts/release.sh`. It builds, runs `npm pack`, and creates a GitHub Release tagged `lensdiff-v<version>` with `lensdiff.tgz` attached.
+Every merge to `main` creates a GitHub Release automatically with `lensdiff.tgz` attached (`.github/workflows/release.yml`). Versions use calendar versioning in UTC, tagged `vYYYY.M.D` (for example `v2026.11.4`); a second release on the same day gets a `-n` suffix such as `v2026.11.4-2`. GitHub Actions must be enabled on the repository once for this to run.
 
 #### Running from source (development)
 
