@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiffCommentThread, DiffFile, ThreadKind } from '../../types/diff';
 import {
   buildFileMinimapMarkers,
+  hasFileLayoutChanged,
   layoutMinimapMarkers,
   type FileMinimapMarkers,
   type MinimapFileEntry,
@@ -33,12 +34,14 @@ const THREAD_MARKER_CLASS: Record<ThreadKind, string> = {
   finding: 'bg-[var(--color-finding-accent)]',
 };
 
+const FILE_ELEMENT_SELECTOR = ':scope > [data-file-path]';
+
 const toPercent = (fraction: number) => `${fraction * 100}%`;
 
 const measureFileLayouts = (container: HTMLElement): Map<string, MinimapFileLayout> => {
   const contentTop = container.getBoundingClientRect().top - container.scrollTop;
   const layouts = new Map<string, MinimapFileLayout>();
-  container.querySelectorAll<HTMLElement>(':scope > [data-file-path]').forEach((fileElement) => {
+  container.querySelectorAll<HTMLElement>(FILE_ELEMENT_SELECTOR).forEach((fileElement) => {
     const { filePath } = fileElement.dataset;
     if (!filePath) return;
     const fileRect = fileElement.getBoundingClientRect();
@@ -71,16 +74,25 @@ export function DiffMinimap({
   const updateViewport = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    setViewport({ scrollTop: container.scrollTop, clientHeight: container.clientHeight });
+    const { scrollTop, clientHeight } = container;
+    setViewport((previous) =>
+      previous.scrollTop === scrollTop && previous.clientHeight === clientHeight
+        ? previous
+        : { scrollTop, clientHeight },
+    );
   }, [scrollContainerRef]);
 
   const measure = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    setMeasurement({
-      scrollHeight: container.scrollHeight,
-      fileLayouts: measureFileLayouts(container),
-    });
+    const { scrollHeight } = container;
+    const fileLayouts = measureFileLayouts(container);
+    setMeasurement((previous) =>
+      Math.abs(previous.scrollHeight - scrollHeight) < 1 &&
+      !hasFileLayoutChanged(previous.fileLayouts, fileLayouts)
+        ? previous
+        : { scrollHeight, fileLayouts },
+    );
     updateViewport();
   }, [scrollContainerRef, updateViewport]);
 
@@ -109,7 +121,7 @@ export function DiffMinimap({
     const resizeObserver = new ResizeObserver(scheduleMeasure);
     resizeObserver.observe(container);
     container
-      .querySelectorAll(':scope > [data-file-path]')
+      .querySelectorAll(FILE_ELEMENT_SELECTOR)
       .forEach((fileElement) => resizeObserver.observe(fileElement));
     container.addEventListener('scroll', handleScroll, { passive: true });
 
@@ -196,22 +208,19 @@ export function DiffMinimap({
     const container = scrollContainerRef.current;
     const contentY = toContentY(clientY);
     if (!container || contentY === null) return;
-    container.scrollTop = contentY - dragOffset * container.scrollHeight;
+    container.scrollTop = contentY - dragOffset;
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const container = scrollContainerRef.current;
-    const minimap = minimapRef.current;
-    if (event.button !== 0 || !container || !minimap || container.scrollHeight <= 0) return;
+    const contentY = toContentY(event.clientY);
+    if (event.button !== 0 || !container || contentY === null) return;
     event.preventDefault();
-    minimap.setPointerCapture(event.pointerId);
+    minimapRef.current?.setPointerCapture(event.pointerId);
 
-    const rect = minimap.getBoundingClientRect();
-    const pointer = (event.clientY - rect.top) / rect.height;
-    const viewportTop = container.scrollTop / container.scrollHeight;
-    const viewportHeight = container.clientHeight / container.scrollHeight;
-    const isInsideViewport = pointer >= viewportTop && pointer <= viewportTop + viewportHeight;
-    dragOffsetRef.current = isInsideViewport ? pointer - viewportTop : viewportHeight / 2;
+    const { scrollTop, clientHeight } = container;
+    const isInsideViewport = contentY >= scrollTop && contentY <= scrollTop + clientHeight;
+    dragOffsetRef.current = isInsideViewport ? contentY - scrollTop : clientHeight / 2;
     scrollToPointer(event.clientY, dragOffsetRef.current);
   };
 

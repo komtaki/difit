@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { DiffCommentThread, DiffFile, DiffLine } from '../../types/diff';
 
-import { buildFileMinimapMarkers, layoutMinimapMarkers, type MinimapFileLayout } from './minimap';
+import {
+  buildFileMinimapMarkers,
+  hasFileLayoutChanged,
+  layoutMinimapMarkers,
+  type MinimapFileLayout,
+} from './minimap';
 
 const line = (
   type: DiffLine['type'],
@@ -122,6 +127,18 @@ describe('buildFileMinimapMarkers', () => {
     ]);
   });
 
+  it('reuses the change ranges of a file when only its threads change', () => {
+    const file = createFile([line('normal', 1, 1), line('add', undefined, 2)]);
+
+    const withoutThreads = buildFileMinimapMarkers(file, []);
+    const withThread = buildFileMinimapMarkers(file, [
+      createThread({ position: { side: 'new', line: 2 } }),
+    ]);
+
+    expect(withThread.changes).toBe(withoutThreads.changes);
+    expect(withThread.threads).toHaveLength(1);
+  });
+
   it('returns no markers for a file without lines', () => {
     const file: DiffFile = { ...createFile([]), chunks: [] };
     const threads = [createThread({ position: { side: 'new', line: 1 } })];
@@ -157,5 +174,30 @@ describe('layoutMinimapMarkers', () => {
     expect(
       layoutMinimapMarkers([{ path: file.path, markers, layout, isCollapsed: false }], 0),
     ).toEqual({ boundaries: [], changes: [], threads: [] });
+  });
+});
+
+describe('hasFileLayoutChanged', () => {
+  const layouts = new Map<string, MinimapFileLayout>([
+    ['src/a.ts', { top: 0, bodyTop: 40, bodyHeight: 200 }],
+  ]);
+
+  it('ignores sub-pixel differences', () => {
+    const next = new Map([['src/a.ts', { top: 0.4, bodyTop: 40.6, bodyHeight: 199.5 }]]);
+
+    expect(hasFileLayoutChanged(layouts, next)).toBe(false);
+  });
+
+  it('detects a moved or resized file', () => {
+    const next = new Map([['src/a.ts', { top: 0, bodyTop: 40, bodyHeight: 260 }]]);
+
+    expect(hasFileLayoutChanged(layouts, next)).toBe(true);
+  });
+
+  it('detects added or removed files', () => {
+    const next = new Map([...layouts, ['src/b.ts', { top: 300, bodyTop: 340, bodyHeight: 10 }]]);
+
+    expect(hasFileLayoutChanged(layouts, next)).toBe(true);
+    expect(hasFileLayoutChanged(next, layouts)).toBe(true);
   });
 });
