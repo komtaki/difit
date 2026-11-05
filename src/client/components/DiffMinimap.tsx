@@ -200,7 +200,7 @@ export function DiffMinimap({
           <div
             key={change.key}
             data-marker={change.kind}
-            className={`absolute left-0.5 w-1.5 min-h-0.5 ${
+            className={`absolute left-1 right-4 min-h-0.5 ${
               change.kind === 'add' ? 'bg-diff-addition-border' : 'bg-github-danger'
             }`}
             style={{ top: toPercent(change.top), height: toPercent(change.height) }}
@@ -210,7 +210,7 @@ export function DiffMinimap({
           <div
             key={thread.key}
             data-marker={thread.kind}
-            className={`absolute right-0.5 h-1 w-1.5 -translate-y-1/2 rounded-sm ${THREAD_MARKER_CLASS[thread.kind]}`}
+            className={`absolute right-1 h-1.5 w-2 -translate-y-1/2 rounded-sm ${THREAD_MARKER_CLASS[thread.kind]}`}
             style={{ top: toPercent(thread.top) }}
           />
         ))}
@@ -279,7 +279,7 @@ export function DiffMinimap({
       ref={minimapRef}
       data-testid="diff-minimap"
       aria-hidden="true"
-      className="relative w-4 shrink-0 cursor-pointer touch-none select-none overflow-hidden border-l border-github-border bg-github-bg-secondary"
+      className="relative w-[48px] shrink-0 cursor-pointer touch-none select-none overflow-hidden border-l border-github-border bg-github-bg-secondary"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
