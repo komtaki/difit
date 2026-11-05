@@ -206,6 +206,7 @@ describe('DiffMinimap', () => {
 
     fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
     fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
+    fireEvent.scroll(scrollContainer);
     expect(scrollContainer.scrollTop).toBe(150);
 
     await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
@@ -218,11 +219,26 @@ describe('DiffMinimap', () => {
 
     fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
     fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
+    expect(scrollContainer.style.overflowAnchor).toBe('none');
     fireEvent.wheel(scrollContainer);
+    expect(scrollContainer.style.overflowAnchor).toBe('');
 
     await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
 
     expect(scrollContainer.scrollTop).toBe(150);
+  });
+
+  it('stops keeping the position once something else scrolls the container', async () => {
+    const { minimap, scrollContainer } = renderMinimap();
+
+    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
+    fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
+    scrollContainer.scrollTop = 500;
+    fireEvent.scroll(scrollContainer);
+
+    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
+
+    expect(scrollContainer.scrollTop).toBe(500);
   });
 
   it('does not correct the scroll position while dragging', async () => {

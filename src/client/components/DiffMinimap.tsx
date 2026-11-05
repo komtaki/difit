@@ -75,6 +75,7 @@ export function DiffMinimap({
   const dragOffsetRef = useRef<number | null>(null);
   const pinnedPositionRef = useRef<PinnedPosition | null>(null);
   const pinTimeoutRef = useRef<number | null>(null);
+  const ownScrollTopRef = useRef<number | null>(null);
   const [measurement, setMeasurement] = useState<Measurement>({
     scrollHeight: 0,
     fileLayouts: new Map(),
@@ -88,12 +89,15 @@ export function DiffMinimap({
   }, [scrollContainerRef]);
 
   const unpinPosition = useCallback(() => {
+    if (pinnedPositionRef.current && scrollContainerRef.current) {
+      scrollContainerRef.current.style.overflowAnchor = '';
+    }
     pinnedPositionRef.current = null;
     if (pinTimeoutRef.current !== null) {
       window.clearTimeout(pinTimeoutRef.current);
       pinTimeoutRef.current = null;
     }
-  }, []);
+  }, [scrollContainerRef]);
 
   const measure = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -105,6 +109,7 @@ export function DiffMinimap({
       const targetScrollTop = anchorY - pinned.viewportOffset;
       if (Math.abs(container.scrollTop - targetScrollTop) >= 1) {
         container.scrollTop = targetScrollTop;
+        ownScrollTopRef.current = container.scrollTop;
       }
     }
     setMeasurement({ scrollHeight: container.scrollHeight, fileLayouts });
@@ -126,6 +131,10 @@ export function DiffMinimap({
     };
     let scrollFrame: number | null = null;
     const handleScroll = () => {
+      const ownScrollTop = ownScrollTopRef.current;
+      if (ownScrollTop === null || Math.abs(container.scrollTop - ownScrollTop) >= 1) {
+        unpinPosition();
+      }
       if (scrollFrame !== null) return;
       scrollFrame = requestAnimationFrame(() => {
         scrollFrame = null;
@@ -232,6 +241,7 @@ export function DiffMinimap({
     const contentY = toContentY(clientY);
     if (!container || contentY === null) return;
     container.scrollTop = contentY - dragOffset * container.scrollHeight;
+    ownScrollTopRef.current = container.scrollTop;
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -270,6 +280,7 @@ export function DiffMinimap({
     const anchor = findScrollAnchor(measureFileLayouts(container), contentY);
     if (!anchor) return;
     pinnedPositionRef.current = { anchor, viewportOffset: contentY - container.scrollTop };
+    container.style.overflowAnchor = 'none';
     pinTimeoutRef.current = window.setTimeout(unpinPosition, PIN_DURATION_MS);
   };
 
