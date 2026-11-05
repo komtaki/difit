@@ -25,6 +25,7 @@ import { Checkbox } from './components/Checkbox';
 import { CommentsDropdown } from './components/CommentsDropdown';
 import { CommentsListModal } from './components/CommentsListModal';
 import { DiffQuickMenu } from './components/DiffQuickMenu';
+import { DiffMinimap } from './components/DiffMinimap';
 import { DiffViewer } from './components/DiffViewer';
 import { FileList } from './components/FileList';
 import { FindingsPanel } from './components/FindingsPanel';
@@ -1759,6 +1760,14 @@ function App() {
               );
             })}
           </main>
+          {activeTab === 'files' && !isMobile && (
+            <DiffMinimap
+              scrollContainerRef={diffScrollContainerRef}
+              files={diffData.files}
+              threads={diffVisibleThreads}
+              collapsedFiles={collapsedFiles}
+            />
+          )}
           {activeTab === 'files' && lspStatus && isSymbolPanelOpen && (
             <>
               <div
