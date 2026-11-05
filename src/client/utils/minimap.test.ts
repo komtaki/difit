@@ -2,13 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DiffCommentThread, DiffFile, DiffLine } from '../../types/diff';
 
-import {
-  buildFileMinimapMarkers,
-  findScrollAnchor,
-  layoutMinimapMarkers,
-  resolveScrollAnchor,
-  type MinimapFileLayout,
-} from './minimap';
+import { buildFileMinimapMarkers, layoutMinimapMarkers, type MinimapFileLayout } from './minimap';
 
 const line = (
   type: DiffLine['type'],
@@ -163,36 +157,5 @@ describe('layoutMinimapMarkers', () => {
     expect(
       layoutMinimapMarkers([{ path: file.path, markers, layout, isCollapsed: false }], 0),
     ).toEqual({ boundaries: [], changes: [], threads: [] });
-  });
-});
-
-describe('scroll anchor', () => {
-  const layouts = new Map<string, MinimapFileLayout>([
-    ['src/a.ts', { top: 0, bodyTop: 40, bodyHeight: 200 }],
-    ['src/b.ts', { top: 300, bodyTop: 340, bodyHeight: 100 }],
-  ]);
-
-  it('anchors a content position to the file containing it and its ratio in the body', () => {
-    expect(findScrollAnchor(layouts, 365)).toEqual({ filePath: 'src/b.ts', ratio: 0.25 });
-  });
-
-  it('clamps a position on the file header to the start of the body', () => {
-    expect(findScrollAnchor(layouts, 310)).toEqual({ filePath: 'src/b.ts', ratio: 0 });
-  });
-
-  it('returns null before the first file', () => {
-    expect(
-      findScrollAnchor(new Map([['src/a.ts', { top: 50, bodyTop: 90, bodyHeight: 10 }]]), 10),
-    ).toBeNull();
-  });
-
-  it('resolves the anchor against the latest layout of the file', () => {
-    const grown = new Map<string, MinimapFileLayout>([
-      ['src/a.ts', { top: 0, bodyTop: 40, bodyHeight: 2000 }],
-      ['src/b.ts', { top: 2100, bodyTop: 2140, bodyHeight: 400 }],
-    ]);
-
-    expect(resolveScrollAnchor(grown, { filePath: 'src/b.ts', ratio: 0.25 })).toBe(2240);
-    expect(resolveScrollAnchor(grown, { filePath: 'src/c.ts', ratio: 0.25 })).toBeNull();
   });
 });

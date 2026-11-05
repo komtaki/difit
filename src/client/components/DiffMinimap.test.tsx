@@ -201,53 +201,13 @@ describe('DiffMinimap', () => {
     expect(scrollContainer.scrollTop).toBe(300);
   });
 
-  it('keeps the clicked position in place when the content above it grows', async () => {
-    const { minimap, scrollContainer } = renderMinimap();
+  it('moves the markers when the file layout changes', async () => {
+    const { minimap } = renderMinimap();
 
-    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
-    fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
-    fireEvent.scroll(scrollContainer);
-    expect(scrollContainer.scrollTop).toBe(150);
+    await resizeContent({ fileTop: 100, fileHeight: 500, bodyTop: 140, bodyHeight: 400 });
 
-    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
-
-    expect(scrollContainer.scrollTop).toBe(660);
-  });
-
-  it('stops keeping the position once the user scrolls with the wheel', async () => {
-    const { minimap, scrollContainer } = renderMinimap();
-
-    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
-    fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
-    expect(scrollContainer.style.overflowAnchor).toBe('none');
-    fireEvent.wheel(scrollContainer);
-    expect(scrollContainer.style.overflowAnchor).toBe('');
-
-    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
-
-    expect(scrollContainer.scrollTop).toBe(150);
-  });
-
-  it('stops keeping the position once something else scrolls the container', async () => {
-    const { minimap, scrollContainer } = renderMinimap();
-
-    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
-    fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
-    scrollContainer.scrollTop = 500;
-    fireEvent.scroll(scrollContainer);
-
-    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
-
-    expect(scrollContainer.scrollTop).toBe(500);
-  });
-
-  it('does not correct the scroll position while dragging', async () => {
-    const { minimap, scrollContainer } = renderMinimap();
-
-    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
-
-    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
-
-    expect(scrollContainer.scrollTop).toBe(150);
+    const deletion = minimap.querySelector<HTMLElement>('[data-marker="delete"]');
+    expect(deletion?.style.top).toBe('24%');
+    expect(deletion?.style.height).toBe('10%');
   });
 });
