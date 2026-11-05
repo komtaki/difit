@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiffCommentThread, DiffFile, ThreadKind } from '../../types/diff';
 import {
   buildFileMinimapMarkers,
+  findScrollAnchor,
   layoutMinimapMarkers,
+  resolveScrollAnchor,
   type FileMinimapMarkers,
   type MinimapFileEntry,
   type MinimapFileLayout,
+  type MinimapScrollAnchor,
 } from '../utils/minimap';
 
 interface DiffMinimapProps {
@@ -26,6 +29,14 @@ interface Viewport {
   scrollTop: number;
   clientHeight: number;
 }
+
+interface PinnedPosition {
+  anchor: MinimapScrollAnchor;
+  viewportOffset: number;
+}
+
+const PIN_DURATION_MS = 3000;
+const USER_SCROLL_EVENTS = ['wheel', 'touchstart', 'pointerdown'] as const;
 
 const THREAD_MARKER_CLASS: Record<ThreadKind, string> = {
   comment: 'bg-github-warning',
@@ -62,6 +73,8 @@ export function DiffMinimap({
 }: DiffMinimapProps) {
   const minimapRef = useRef<HTMLDivElement | null>(null);
   const dragOffsetRef = useRef<number | null>(null);
+  const pinnedPositionRef = useRef<PinnedPosition | null>(null);
+  const pinTimeoutRef = useRef<number | null>(null);
   const [measurement, setMeasurement] = useState<Measurement>({
     scrollHeight: 0,
     fileLayouts: new Map(),
@@ -74,13 +87,27 @@ export function DiffMinimap({
     setViewport({ scrollTop: container.scrollTop, clientHeight: container.clientHeight });
   }, [scrollContainerRef]);
 
+  const unpinPosition = useCallback(() => {
+    pinnedPositionRef.current = null;
+    if (pinTimeoutRef.current !== null) {
+      window.clearTimeout(pinTimeoutRef.current);
+      pinTimeoutRef.current = null;
+    }
+  }, []);
+
   const measure = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    setMeasurement({
-      scrollHeight: container.scrollHeight,
-      fileLayouts: measureFileLayouts(container),
-    });
+    const fileLayouts = measureFileLayouts(container);
+    const pinned = pinnedPositionRef.current;
+    const anchorY = pinned ? resolveScrollAnchor(fileLayouts, pinned.anchor) : null;
+    if (pinned && anchorY !== null) {
+      const targetScrollTop = anchorY - pinned.viewportOffset;
+      if (Math.abs(container.scrollTop - targetScrollTop) >= 1) {
+        container.scrollTop = targetScrollTop;
+      }
+    }
+    setMeasurement({ scrollHeight: container.scrollHeight, fileLayouts });
     updateViewport();
   }, [scrollContainerRef, updateViewport]);
 
@@ -112,14 +139,22 @@ export function DiffMinimap({
       .querySelectorAll(':scope > [data-file-path]')
       .forEach((fileElement) => resizeObserver.observe(fileElement));
     container.addEventListener('scroll', handleScroll, { passive: true });
+    USER_SCROLL_EVENTS.forEach((type) =>
+      container.addEventListener(type, unpinPosition, { passive: true }),
+    );
+    window.addEventListener('keydown', unpinPosition);
 
     return () => {
       resizeObserver.disconnect();
       container.removeEventListener('scroll', handleScroll);
+      USER_SCROLL_EVENTS.forEach((type) => container.removeEventListener(type, unpinPosition));
+      window.removeEventListener('keydown', unpinPosition);
       if (measureFrame !== null) cancelAnimationFrame(measureFrame);
       if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
     };
-  }, [files, measure, scrollContainerRef, updateViewport]);
+  }, [files, measure, scrollContainerRef, unpinPosition, updateViewport]);
+
+  useEffect(() => unpinPosition, [unpinPosition]);
 
   const markersByPath = useMemo(() => {
     const threadsByPath = new Map<string, DiffCommentThread[]>();
@@ -183,14 +218,20 @@ export function DiffMinimap({
     );
   }, [collapsedFiles, markersByPath, measurement]);
 
-  const scrollToPointer = (clientY: number, dragOffset: number) => {
+  const toContentY = (clientY: number) => {
     const container = scrollContainerRef.current;
     const minimap = minimapRef.current;
-    if (!container || !minimap) return;
+    if (!container || !minimap) return null;
     const rect = minimap.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    container.scrollTop =
-      ((clientY - rect.top) / rect.height - dragOffset) * container.scrollHeight;
+    if (rect.height <= 0) return null;
+    return ((clientY - rect.top) / rect.height) * container.scrollHeight;
+  };
+
+  const scrollToPointer = (clientY: number, dragOffset: number) => {
+    const container = scrollContainerRef.current;
+    const contentY = toContentY(clientY);
+    if (!container || contentY === null) return;
+    container.scrollTop = contentY - dragOffset * container.scrollHeight;
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -198,6 +239,7 @@ export function DiffMinimap({
     const minimap = minimapRef.current;
     if (event.button !== 0 || !container || !minimap || container.scrollHeight <= 0) return;
     event.preventDefault();
+    unpinPosition();
     minimap.setPointerCapture(event.pointerId);
 
     const rect = minimap.getBoundingClientRect();
@@ -214,9 +256,21 @@ export function DiffMinimap({
     scrollToPointer(event.clientY, dragOffsetRef.current);
   };
 
-  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     dragOffsetRef.current = null;
     minimapRef.current?.releasePointerCapture(event.pointerId);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const isDragging = dragOffsetRef.current !== null;
+    endDrag(event);
+    const container = scrollContainerRef.current;
+    const contentY = toContentY(event.clientY);
+    if (!isDragging || !container || contentY === null) return;
+    const anchor = findScrollAnchor(measureFileLayouts(container), contentY);
+    if (!anchor) return;
+    pinnedPositionRef.current = { anchor, viewportOffset: contentY - container.scrollTop };
+    pinTimeoutRef.current = window.setTimeout(unpinPosition, PIN_DURATION_MS);
   };
 
   const { scrollHeight } = measurement;
@@ -228,8 +282,8 @@ export function DiffMinimap({
       className="relative w-4 shrink-0 cursor-pointer touch-none select-none overflow-hidden border-l border-github-border bg-github-bg-secondary"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={endDrag}
     >
       {markerElements}
       {scrollHeight > 0 && (

@@ -124,3 +124,30 @@ export function layoutMinimapMarkers(
   }
   return result;
 }
+
+export interface MinimapScrollAnchor {
+  filePath: string;
+  ratio: number;
+}
+
+export function findScrollAnchor(
+  layouts: Map<string, MinimapFileLayout>,
+  contentY: number,
+): MinimapScrollAnchor | null {
+  let anchor: MinimapScrollAnchor | null = null;
+  for (const [filePath, layout] of layouts) {
+    if (layout.top > contentY) break;
+    const ratio = layout.bodyHeight > 0 ? (contentY - layout.bodyTop) / layout.bodyHeight : 0;
+    anchor = { filePath, ratio: Math.min(Math.max(ratio, 0), 1) };
+  }
+  return anchor;
+}
+
+export function resolveScrollAnchor(
+  layouts: Map<string, MinimapFileLayout>,
+  anchor: MinimapScrollAnchor,
+): number | null {
+  const layout = layouts.get(anchor.filePath);
+  if (!layout) return null;
+  return layout.bodyTop + anchor.ratio * layout.bodyHeight;
+}

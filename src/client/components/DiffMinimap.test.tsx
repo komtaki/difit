@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,13 +92,41 @@ const renderMinimap = (props: { collapsedFiles?: Set<string>; isRendered?: boole
   return { ...result, scrollContainer, minimap };
 };
 
+let content = { fileTop: 100, fileHeight: 300, bodyTop: 140, bodyHeight: 200 };
+let resizeCallbacks: ResizeObserverCallback[] = [];
+
+const scrollTopOfContainer = () =>
+  document.querySelector<HTMLElement>('[data-testid="scroll-container"]')?.scrollTop ?? 0;
+
+const resizeContent = async (next: typeof content) => {
+  content = next;
+  await act(async () => {
+    resizeCallbacks.forEach((callback) => callback([], {} as ResizeObserver));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+};
+
 describe('DiffMinimap', () => {
   beforeEach(() => {
+    content = { fileTop: 100, fileHeight: 300, bodyTop: 140, bodyHeight: 200 };
+    resizeCallbacks = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallbacks.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
         const testId = this.dataset.testid;
-        if (testId === 'file') return rect(100, 300);
-        if (testId === 'body') return rect(140, 200);
+        const scrollTop = scrollTopOfContainer();
+        if (testId === 'file') return rect(content.fileTop - scrollTop, content.fileHeight);
+        if (testId === 'body') return rect(content.bodyTop - scrollTop, content.bodyHeight);
         if (testId === 'diff-minimap') return rect(0, 100);
         return rect(0, CLIENT_HEIGHT);
       },
@@ -109,6 +137,7 @@ describe('DiffMinimap', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('renders change, thread and file boundary markers at their scroll positions', () => {
@@ -170,5 +199,39 @@ describe('DiffMinimap', () => {
     fireEvent.pointerUp(minimap, { clientY: 35, pointerId: 1 });
     fireEvent.pointerMove(minimap, { clientY: 80, pointerId: 1 });
     expect(scrollContainer.scrollTop).toBe(300);
+  });
+
+  it('keeps the clicked position in place when the content above it grows', async () => {
+    const { minimap, scrollContainer } = renderMinimap();
+
+    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
+    fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
+    expect(scrollContainer.scrollTop).toBe(150);
+
+    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
+
+    expect(scrollContainer.scrollTop).toBe(660);
+  });
+
+  it('stops keeping the position once the user scrolls with the wheel', async () => {
+    const { minimap, scrollContainer } = renderMinimap();
+
+    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
+    fireEvent.pointerUp(minimap, { clientY: 25, pointerId: 1 });
+    fireEvent.wheel(scrollContainer);
+
+    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
+
+    expect(scrollContainer.scrollTop).toBe(150);
+  });
+
+  it('does not correct the scroll position while dragging', async () => {
+    const { minimap, scrollContainer } = renderMinimap();
+
+    fireEvent.pointerDown(minimap, { button: 0, clientY: 25, pointerId: 1 });
+
+    await resizeContent({ fileTop: 500, fileHeight: 500, bodyTop: 540, bodyHeight: 400 });
+
+    expect(scrollContainer.scrollTop).toBe(150);
   });
 });
